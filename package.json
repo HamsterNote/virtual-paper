@@ -1,0 +1,36 @@
+{
+  "name": "virtual-paper",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "packageManager": "yarn@1.22.22",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 9826",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 9826",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check"
+  },
+  "dependencies": {
+    "@system-ui-js/multi-drag": "^0.4.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "latest",
+    "@vitejs/plugin-react": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "eslint": "latest",
+    "eslint-config-standard": "latest",
+    "eslint-plugin-import": "latest",
+    "eslint-plugin-n": "latest",
+    "eslint-plugin-promise": "latest",
+    "globals": "latest",
+    "prettier": "latest",
+    "typescript": "6.0.3",
+    "typescript-eslint": "latest",
+    "vite": "latest"
+  }
+}

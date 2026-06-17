@@ -1,0 +1,7 @@
+node_modules
+dist
+.omo
+.DS_Store
+*.local
+*.tsbuildinfo
+node_modules/.tmp

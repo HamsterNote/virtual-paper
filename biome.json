@@ -1,0 +1,15 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.13/schema.json",
+  "files": {
+    "includes": ["**", "!.omo/**", "!dist/**", "!node_modules/**"]
+  },
+  "formatter": {
+    "enabled": false
+  },
+  "linter": {
+    "enabled": false
+  },
+  "assist": {
+    "enabled": false
+  }
+}
