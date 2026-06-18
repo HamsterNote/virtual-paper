@@ -100,6 +100,12 @@ export type UseVirtualPaperInteractionArgs = {
   maxScale: number
   updateTransform: VirtualPaperTransformUpdater
   endTransform: VirtualPaperTransformUpdater
+  /**
+   * scroll 渲染模式下为 true。
+   * wheel hook 在 scroll 模式下：非 ctrl/meta 的 wheel 交给原生滚动（不 preventDefault），
+   * 仅 ctrl/meta + wheel 触发 JS zoom。
+   */
+  isScrollMode?: boolean
 }
 
 export const DEFAULT_ENABLED_INTERACTIONS = [

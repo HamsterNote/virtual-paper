@@ -216,13 +216,16 @@ export default function App() {
           initialPlacement={initialPlacement}
           renderMode={renderMode}
           contentSize={{ width: 600, height: 400 }}
+          // transform 模式下 container 需显式尺寸（子元素用 100% 撑满）；
+          // scroll 模式下此值被 scaledWidth/Height 覆盖
+          containerStyle={{ width: 600, height: 400 }}
           {...(isControlled ? { transform: controlledTransform } : {})}
           onTransformChange={handleTransformChange}
         >
           <div
             style={{
-              width: 600,
-              height: 400,
+              width: '100%',
+              height: '100%',
               background: '#f0f0f0',
               display: 'grid',
               gridTemplateColumns: 'repeat(3, 1fr)',

@@ -87,12 +87,21 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
         enabledInteractions,
         minScale,
         maxScale,
-        updateTransform
+        updateTransform,
+        isScrollMode
       } = latestArgsRef.current
       const wrapper = wrapperRef.current
       const hasInteraction = (mode: VirtualPaperInteractionMode) => {
         return enabledInteractions.includes(mode)
       }
+
+      // scroll 模式：非 ctrl/meta 的 wheel 交给原生滚动（overflow:auto 处理），
+      // 不 preventDefault、不更新 transform；原生 scroll 事件会反向同步 transform。
+      // 仅 ctrl/meta + wheel 触发 JS zoom（保持焦点锚点）。
+      if (isScrollMode && !event.ctrlKey && !event.metaKey) {
+        return
+      }
+
       let nextTransform: VirtualPaperTransform | null = null
       let source: VirtualPaperInteractionMode | null = null
 

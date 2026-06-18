@@ -14,11 +14,3 @@
   user-select: none;
   -webkit-user-select: none;
 }
-
-.virtual-paper-scroll-surface {
-  position: absolute;
-}
-
-.virtual-paper-scroll-box {
-  position: absolute;
-}

@@ -13,16 +13,11 @@ vi.mock('./useWheelInteractions', () => ({
   useWheelInteractions: vi.fn()
 }))
 
-// scroll 模式测试需要 stub jsdom 不提供的布局属性：
-// - ResizeObserver：jsdom 不内置，stub 为空实现（初始测量走 useLayoutEffect 同步路径）
+// scroll 模式测试需要 stub jsdom 不提供的布局/滚动属性：
+// - ResizeObserver：jsdom 不内置，stub 为空实现
 // - clientWidth/clientHeight：wrapper 视口尺寸（mock 为 800x600）
-// - offsetWidth/offsetHeight：scaler 未缩放测量尺寸（mock 为 400x300）
-//
-// 几何期望值依据 computeScrollGeometry（scrollGeometry.ts）：
-//   originX = max(viewportW, ceil(max(x, 0)))
-//   tailX   = max(viewportW, ceil(viewportW - x - scaledW))
-//   surfaceWidth = originX + scaledW + tailX
-//   scrollLeft = originX - x
+// - offsetWidth/offsetHeight：container 基础内容尺寸（mock 为 400x300）
+// - scrollLeft/scrollTop：用 WeakMap 做 per-element 可读写存储
 describe('VirtualPaper scroll render mode', () => {
   const originals = new Map<string, PropertyDescriptor>()
   const propsToStub = [
@@ -31,9 +26,20 @@ describe('VirtualPaper scroll render mode', () => {
     'offsetWidth',
     'offsetHeight'
   ] as const
+  const scrollProps = ['scrollLeft', 'scrollTop'] as const
+  let scrollStore = new WeakMap<HTMLElement, { scrollLeft: number; scrollTop: number }>()
+
+  const getScroll = (el: HTMLElement) => {
+    const current = scrollStore.get(el)
+    if (current) return current
+    const next = { scrollLeft: 0, scrollTop: 0 }
+    scrollStore.set(el, next)
+    return next
+  }
 
   beforeEach(() => {
     vi.clearAllMocks()
+    scrollStore = new WeakMap<HTMLElement, { scrollLeft: number; scrollTop: number }>()
     // 用 class（非箭头函数）保证可被 `new ResizeObserver(...)` 构造
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
@@ -68,70 +74,88 @@ describe('VirtualPaper scroll render mode', () => {
         }
       })
     }
+
+    for (const prop of scrollProps) {
+      const desc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop)
+      if (desc) originals.set(prop, desc)
+      Object.defineProperty(HTMLElement.prototype, prop, {
+        configurable: true,
+        get(this: HTMLElement) {
+          return getScroll(this)[prop]
+        },
+        set(this: HTMLElement, value: number) {
+          getScroll(this)[prop] = value
+        }
+      })
+    }
   })
 
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
-    for (const [prop, desc] of originals) {
-      Object.defineProperty(HTMLElement.prototype, prop, desc)
+    for (const prop of [...propsToStub, ...scrollProps]) {
+      const desc = originals.get(prop)
+      if (desc) {
+        Object.defineProperty(HTMLElement.prototype, prop, desc)
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, prop)
+      }
     }
     originals.clear()
   })
 
-  it('S2: renders scroll-surface and scroll-box layers in scroll mode', () => {
+  it('S1: wrapper uses overflow:auto for native scrolling in scroll mode', () => {
     render(
       <VirtualPaper
         renderMode={VirtualPaperRenderMode.Scroll}
         transform={{ x: 0, y: 0, scale: 1 }}
-        contentSize={{ width: 400, height: 300 }}
-      >
-        <div>child</div>
-      </VirtualPaper>
-    )
-    expect(
-      screen.getByTestId('virtual-paper-scroll-surface')
-    ).toBeInTheDocument()
-    expect(
-      screen.getByTestId('virtual-paper-scroll-box')
-    ).toBeInTheDocument()
-    expect(screen.getByTestId('virtual-paper-container')).toBeInTheDocument()
-    expect(screen.getByText('child')).toBeInTheDocument()
-  })
-
-  it('S2: scroll-surface width/height sized to surface geometry', () => {
-    render(
-      <VirtualPaper
-        renderMode={VirtualPaperRenderMode.Scroll}
-        transform={{ x: 0, y: 0, scale: 1 }}
-        contentSize={{ width: 400, height: 300 }}
-      >
-        <div>child</div>
-      </VirtualPaper>
-    )
-    const surface = screen.getByTestId('virtual-paper-scroll-surface')
-    // originX=800, scaledW=400, tailX=max(800,800-0-400)=800, surfaceW=2000
-    expect(surface.style.width).toBe('2000px')
-    // originY=600, scaledH=300, tailY=max(600,600-0-300)=600, surfaceH=1500
-    expect(surface.style.height).toBe('1500px')
-  })
-
-  it('S3: sets wrapper.scrollLeft = originX - x and scrollTop = originY - y', () => {
-    render(
-      <VirtualPaper
-        renderMode={VirtualPaperRenderMode.Scroll}
-        transform={{ x: 100, y: 50, scale: 1 }}
         contentSize={{ width: 400, height: 300 }}
       >
         <div>child</div>
       </VirtualPaper>
     )
     const wrapper = screen.getByTestId('virtual-paper-wrapper')
-    expect(wrapper.scrollLeft).toBe(700)
-    expect(wrapper.scrollTop).toBe(550)
+    expect(wrapper.style.overflow).toBe('auto')
   })
 
-  it('S3: handles negative x (content shifted left of viewport)', () => {
+  it('S2: renders 2-layer structure without scroll-surface/scroll-box in scroll mode', () => {
+    render(
+      <VirtualPaper
+        renderMode={VirtualPaperRenderMode.Scroll}
+        transform={{ x: 0, y: 0, scale: 1 }}
+        contentSize={{ width: 400, height: 300 }}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    // 无 scroll-surface / scroll-box 中间层
+    expect(screen.queryByTestId('virtual-paper-scroll-surface')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('virtual-paper-scroll-box')).not.toBeInTheDocument()
+    // wrapper > container > children 2 层结构
+    expect(screen.getByTestId('virtual-paper-wrapper')).toBeInTheDocument()
+    expect(screen.getByTestId('virtual-paper-container')).toBeInTheDocument()
+    expect(screen.getByText('child')).toBeInTheDocument()
+  })
+
+  it('S3: container width/height scaled by transform.scale, no transform CSS', () => {
+    render(
+      <VirtualPaper
+        renderMode={VirtualPaperRenderMode.Scroll}
+        transform={{ x: 0, y: 0, scale: 2 }}
+        contentSize={{ width: 400, height: 300 }}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
+    // scaledW = 400 * 2 = 800, scaledH = 300 * 2 = 600
+    expect(container.style.width).toBe('800px')
+    expect(container.style.height).toBe('600px')
+    // 不使用 transform
+    expect(container.style.transform).toBe('')
+  })
+
+  it('S4: transform.x/y drives wrapper.scrollLeft/Top (negative transform = positive scroll)', () => {
     render(
       <VirtualPaper
         renderMode={VirtualPaperRenderMode.Scroll}
@@ -142,38 +166,13 @@ describe('VirtualPaper scroll render mode', () => {
       </VirtualPaper>
     )
     const wrapper = screen.getByTestId('virtual-paper-wrapper')
-    // originX=800, scrollLeft=800-(-200)=1000
-    expect(wrapper.scrollLeft).toBe(1000)
-    expect(wrapper.scrollTop).toBe(700)
+    // transform.x = -200 → scrollLeft = 200
+    expect(wrapper.scrollLeft).toBe(200)
+    expect(wrapper.scrollTop).toBe(100)
   })
 
-  it('S3: applies scale to surface sizing and scaler transform', () => {
+  it('S5: positive transform.x clamps scrollLeft to 0 (native scroll cannot represent positive transform)', () => {
     render(
-      <VirtualPaper
-        renderMode={VirtualPaperRenderMode.Scroll}
-        transform={{ x: 0, y: 0, scale: 2 }}
-        contentSize={{ width: 400, height: 300 }}
-      >
-        <div>child</div>
-      </VirtualPaper>
-    )
-    const scaler = screen.getByTestId('virtual-paper-container')
-    expect(scaler.style.transform).toBe('scale(2)')
-    const surface = screen.getByTestId('virtual-paper-scroll-surface')
-    // scaledW=800, originX=800, tailX=max(800,800-0-800)=800, surfaceW=2400
-    expect(surface.style.width).toBe('2400px')
-  })
-
-  it('S5: mode switch transform->scroll->transform restores transform rendering', () => {
-    const { rerender } = render(
-      <VirtualPaper transform={{ x: 100, y: 50, scale: 1 }}>
-        <div>child</div>
-      </VirtualPaper>
-    )
-    let container = screen.getByTestId('virtual-paper-container')
-    expect(container.style.transform).toBe('translate3d(100px, 50px, 0) scale(1)')
-
-    rerender(
       <VirtualPaper
         renderMode={VirtualPaperRenderMode.Scroll}
         transform={{ x: 100, y: 50, scale: 1 }}
@@ -182,37 +181,28 @@ describe('VirtualPaper scroll render mode', () => {
         <div>child</div>
       </VirtualPaper>
     )
-    container = screen.getByTestId('virtual-paper-container')
-    expect(container.style.transform).toBe('scale(1)')
     const wrapper = screen.getByTestId('virtual-paper-wrapper')
-    expect(wrapper.scrollLeft).toBe(700)
-
-    rerender(
-      <VirtualPaper transform={{ x: 100, y: 50, scale: 1 }}>
-        <div>child</div>
-      </VirtualPaper>
-    )
-    container = screen.getByTestId('virtual-paper-container')
-    expect(container.style.transform).toBe('translate3d(100px, 50px, 0) scale(1)')
+    // transform.x = 100 → target scrollLeft = -100 → clamped to 0
+    expect(wrapper.scrollLeft).toBe(0)
+    expect(wrapper.scrollTop).toBe(0)
   })
 
-  it('S6: uses contentSize prop over measured size', () => {
+  it('S6: container smaller than wrapper → scrollLeft clamped to 0 (no scroll room)', () => {
     render(
       <VirtualPaper
         renderMode={VirtualPaperRenderMode.Scroll}
         transform={{ x: 0, y: 0, scale: 1 }}
-        contentSize={{ width: 200, height: 150 }}
+        contentSize={{ width: 400, height: 300 }}
       >
         <div>child</div>
       </VirtualPaper>
     )
-    // offsetWidth mock 返回 400，但 contentSize={200,150} 应优先
-    // scaledW=200, surfaceW=800+200+800=1800
-    const surface = screen.getByTestId('virtual-paper-scroll-surface')
-    expect(surface.style.width).toBe('1800px')
+    const wrapper = screen.getByTestId('virtual-paper-wrapper')
+    expect(wrapper.scrollLeft).toBe(0)
+    expect(wrapper.scrollTop).toBe(0)
   })
 
-  it('S7: controlled transform change drives scrollLeft', () => {
+  it('S7: controlled transform change updates wrapper.scrollLeft/Top', () => {
     const { rerender } = render(
       <VirtualPaper
         renderMode={VirtualPaperRenderMode.Scroll}
@@ -223,38 +213,75 @@ describe('VirtualPaper scroll render mode', () => {
       </VirtualPaper>
     )
     let wrapper = screen.getByTestId('virtual-paper-wrapper')
-    expect(wrapper.scrollLeft).toBe(800)
+    expect(wrapper.scrollLeft).toBe(0)
 
     rerender(
       <VirtualPaper
         renderMode={VirtualPaperRenderMode.Scroll}
-        transform={{ x: 300, y: 200, scale: 1 }}
+        transform={{ x: -300, y: -200, scale: 1 }}
         contentSize={{ width: 400, height: 300 }}
       >
         <div>child</div>
       </VirtualPaper>
     )
     wrapper = screen.getByTestId('virtual-paper-wrapper')
-    // originX=max(800,300)=800, scrollLeft=800-300=500
-    expect(wrapper.scrollLeft).toBe(500)
-    expect(wrapper.scrollTop).toBe(400)
+    expect(wrapper.scrollLeft).toBe(300)
+    expect(wrapper.scrollTop).toBe(200)
   })
 
-  it('scroll mode wrapper uses overflow:hidden (programmatic scroll, no native scrollbar)', () => {
-    render(
+  it('S8: mode switch transform->scroll->transform preserves transform state', () => {
+    const { rerender } = render(
+      <VirtualPaper transform={{ x: -100, y: -50, scale: 1 }}>
+        <div>child</div>
+      </VirtualPaper>
+    )
+    let container = screen.getByTestId('virtual-paper-container')
+    expect(container.style.transform).toBe('translate3d(-100px, -50px, 0) scale(1)')
+
+    // 切换到 scroll 模式
+    rerender(
       <VirtualPaper
         renderMode={VirtualPaperRenderMode.Scroll}
-        transform={{ x: 0, y: 0, scale: 1 }}
+        transform={{ x: -100, y: -50, scale: 1 }}
         contentSize={{ width: 400, height: 300 }}
       >
         <div>child</div>
       </VirtualPaper>
     )
+    container = screen.getByTestId('virtual-paper-container')
+    // scroll 模式无 transform
+    expect(container.style.transform).toBe('')
     const wrapper = screen.getByTestId('virtual-paper-wrapper')
-    expect(wrapper.style.overflow).toBe('hidden')
+    // transform.x=-100 → scrollLeft=100
+    expect(wrapper.scrollLeft).toBe(100)
+
+    // 切回 transform 模式
+    rerender(
+      <VirtualPaper transform={{ x: -100, y: -50, scale: 1 }}>
+        <div>child</div>
+      </VirtualPaper>
+    )
+    container = screen.getByTestId('virtual-paper-container')
+    expect(container.style.transform).toBe('translate3d(-100px, -50px, 0) scale(1)')
   })
 
-  it('containerStyle and containerClassName apply to scaler in scroll mode', () => {
+  it('S9: contentSize prop determines base size for container width/height', () => {
+    render(
+      <VirtualPaper
+        renderMode={VirtualPaperRenderMode.Scroll}
+        transform={{ x: 0, y: 0, scale: 2 }}
+        contentSize={{ width: 200, height: 150 }}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
+    // baseSize=200x150, scale=2 → scaledW=400, scaledH=300
+    expect(container.style.width).toBe('400px')
+    expect(container.style.height).toBe('300px')
+  })
+
+  it('S10: containerStyle and containerClassName apply to container in scroll mode', () => {
     render(
       <VirtualPaper
         renderMode={VirtualPaperRenderMode.Scroll}
@@ -266,12 +293,12 @@ describe('VirtualPaper scroll render mode', () => {
         <div>child</div>
       </VirtualPaper>
     )
-    const scaler = screen.getByTestId('virtual-paper-container')
-    expect(scaler.className).toContain('user-container')
-    expect(scaler.style.backgroundColor).toBe('red')
+    const container = screen.getByTestId('virtual-paper-container')
+    expect(container.className).toContain('user-container')
+    expect(container.style.backgroundColor).toBe('red')
   })
 
-  it('scroll mode wires gesture hooks with containerRef pointing to scaledBox', () => {
+  it('S11: scroll mode wires gesture hooks with containerRef pointing to container', () => {
     render(
       <VirtualPaper
         renderMode={VirtualPaperRenderMode.Scroll}
@@ -283,17 +310,16 @@ describe('VirtualPaper scroll render mode', () => {
     )
     expect(useMultiDragInteractions).toHaveBeenCalled()
     expect(useWheelInteractions).toHaveBeenCalled()
-    // 测量会触发 re-render，取最后一次调用的 args 反映最新 ref 绑定
     const calls = vi.mocked(useMultiDragInteractions).mock.calls
     const args = calls[calls.length - 1][0]
     expect(args.containerRef.current).not.toBeNull()
-    // containerRef 应指向 scaledBox（其 rect.left === transform.x，保 hooks 语义）
+    // containerRef 直接指向 container（不再是 scroll-box 中间层）
     expect(args.containerRef.current?.getAttribute('data-testid')).toBe(
-      'virtual-paper-scroll-box'
+      'virtual-paper-container'
     )
   })
 
-  it('default renderMode is Transform (regression: no scroll layers)', () => {
+  it('S12: default renderMode is Transform (regression: no scroll mode behavior)', () => {
     render(
       <VirtualPaper transform={{ x: 0, y: 0, scale: 1 }}>
         <div>child</div>

@@ -15,6 +15,7 @@ type WheelHarnessProps = {
   initialTransform?: VirtualPaperTransform
   minScale?: number
   maxScale?: number
+  isScrollMode?: boolean
   onUpdate?: VirtualPaperTransformUpdater
   onEnd?: VirtualPaperTransformUpdater
 }
@@ -26,6 +27,7 @@ function WheelHarness({
   initialTransform = defaultTransform,
   minScale = 0.25,
   maxScale = 4,
+  isScrollMode = false,
   onUpdate = () => undefined,
   onEnd = () => undefined
 }: WheelHarnessProps) {
@@ -44,7 +46,8 @@ function WheelHarness({
       onUpdate(next, meta)
       setTransform(next)
     },
-    endTransform: onEnd
+    endTransform: onEnd,
+    isScrollMode
   })
 
   return (
@@ -307,5 +310,72 @@ describe('useWheelInteractions', () => {
         phase: 'end'
       }
     )
+  })
+
+  // --- scroll 模式 wheel 行为 ---
+  // scroll 模式下非 ctrl wheel 交给原生滚动，不 preventDefault、不更新 transform；
+  // 仅 ctrl+wheel 触发 JS zoom。
+
+  it('scroll mode: non-ctrl wheel does not preventDefault or update transform (native scroll)', () => {
+    const onUpdate = vi.fn()
+
+    render(
+      <WheelHarness
+        enabledInteractions={[VirtualPaperInteractionMode.TrackpadScrollPan]}
+        isScrollMode
+        onUpdate={onUpdate}
+      />
+    )
+
+    const { preventDefault } = dispatchWheel(screen.getByTestId('wheel-wrapper'), {
+      deltaX: 40,
+      deltaY: 25,
+      ctrlKey: false
+    })
+
+    expect(onUpdate).not.toHaveBeenCalled()
+    expect(preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('scroll mode: ctrl+wheel still zooms with preventDefault', () => {
+    const onUpdate = vi.fn()
+
+    render(
+      <WheelHarness
+        enabledInteractions={[VirtualPaperInteractionMode.MouseWheelCtrlZoom]}
+        initialTransform={{ x: 0, y: 0, scale: 1 }}
+        isScrollMode
+        onUpdate={onUpdate}
+      />
+    )
+
+    const { preventDefault } = dispatchWheel(screen.getByTestId('wheel-wrapper'), {
+      deltaY: -100,
+      ctrlKey: true
+    })
+
+    expect(onUpdate).toHaveBeenCalledTimes(1)
+    expect(preventDefault).toHaveBeenCalledTimes(1)
+    const next = onUpdate.mock.calls[0][0] as VirtualPaperTransform
+    expect(next.scale).toBeGreaterThan(1)
+  })
+
+  it('scroll mode: MouseWheelZoom (plain wheel) does not zoom (native scroll takes over)', () => {
+    const onUpdate = vi.fn()
+
+    render(
+      <WheelHarness
+        enabledInteractions={[VirtualPaperInteractionMode.MouseWheelZoom]}
+        isScrollMode
+        onUpdate={onUpdate}
+      />
+    )
+
+    dispatchWheel(screen.getByTestId('wheel-wrapper'), {
+      deltaY: -100,
+      ctrlKey: false
+    })
+
+    expect(onUpdate).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type {
   VirtualPaperProps,
@@ -7,6 +7,7 @@ import type {
 } from './types'
 import {
   VirtualPaperInitialPlacement,
+  VirtualPaperInteractionMode,
   VirtualPaperRenderMode,
   DEFAULT_ENABLED_INTERACTIONS
 } from './types'
@@ -41,12 +42,8 @@ export const VirtualPaper = ({
 }: VirtualPaperProps) => {
   const wrapperRef = useRef<HTMLDivElement>(null)
   // transform 模式：containerRef 指向应用 transform 的 container（同时是 user-visible 层）
-  // scroll 模式：containerRef 指向 scaledBox —— 与 transform 模式语义对应（都代表 transform 应用后的
-  //   内容盒子），供 initial placement 通过 getBoundingClientRect 测量内容尺寸算居中；
-  //   交互 hooks（wheel/multi-drag）以 wrapperRect + transform state 计算锚点，仅需 ref 非空
+  // scroll 模式：containerRef 直接指向文档流 container，原生 scroll 会让 rect.left/top 等于 transform.x/y
   const containerRef = useRef<HTMLDivElement>(null)
-  // scroll 模式专用：指向 scaler 元素，用于测量未缩放内容尺寸（offsetWidth/Height）
-  const measureRef = useRef<HTMLDivElement>(null)
   const isControlled = controlledTransform !== undefined
   const isScrollMode = renderMode === VirtualPaperRenderMode.Scroll
 
@@ -113,30 +110,52 @@ export const VirtualPaper = ({
 
   const transformStyle = useMemo(() => serializeTransform(transform), [transform])
 
-  // scroll 模式几何：测量 wrapper 视口 + scaler 基础尺寸，计算 scrollSurface/scaledBox/scroll 同步参数
-  // base size 优先级：contentSize prop > measureRef.offsetWidth/Height > {0,0}
-  const { geometry: scrollGeometry, baseSize: scrollBaseSize } = useScrollGeometry({
+  // scroll 模式：解析内容基础尺寸（contentSize prop 优先）
+  const { baseSize: scrollBaseSize } = useScrollGeometry({
     enabled: isScrollMode,
-    wrapperRef,
-    measureRef,
-    contentSize,
-    transform
+    contentSize
   })
 
-  // scroll 同步：程序化写 wrapper.scrollLeft/Top = origin - transform
-  // overflow:hidden 下程序化 scroll 仍生效，且避免原生滚动条/手势冲突
+  // scroll 模式：transform 变化（zoom/drag/controlled prop）→ 原生滚动位置
+  // 原生 scroll 只能表示 transform.x/y <= 0，正向 transform 会被钳制到 scroll 0。
   useLayoutEffect(() => {
     if (!isScrollMode) return
     const wrapper = wrapperRef.current
-    if (!wrapper || !scrollGeometry.ready) return
-    wrapper.scrollLeft = scrollGeometry.scrollLeft
-    wrapper.scrollTop = scrollGeometry.scrollTop
-  }, [
-    isScrollMode,
-    scrollGeometry.ready,
-    scrollGeometry.scrollLeft,
-    scrollGeometry.scrollTop
-  ])
+    if (!wrapper) return
+    const targetLeft = Math.max(0, Math.round(-transform.x))
+    const targetTop = Math.max(0, Math.round(-transform.y))
+    if (wrapper.scrollLeft !== targetLeft) {
+      wrapper.scrollLeft = targetLeft
+    }
+    if (wrapper.scrollTop !== targetTop) {
+      wrapper.scrollTop = targetTop
+    }
+  }, [isScrollMode, transform.x, transform.y])
+
+  // scroll 模式：原生滚动位置 → transform state。
+  // 写 scroll 后触发的 scroll 事件会因值相等 bail out，避免同步循环。
+  useEffect(() => {
+    if (!isScrollMode) return
+    const wrapper = wrapperRef.current
+    if (!wrapper) return
+
+    const handleScroll = () => {
+      const newX = -wrapper.scrollLeft
+      const newY = -wrapper.scrollTop
+      if (transform.x === newX && transform.y === newY) return
+      updateTransform(
+        { ...transform, x: newX, y: newY },
+        {
+          source: VirtualPaperInteractionMode.TrackpadScrollPan,
+          inputType: 'wheel',
+          phase: 'change'
+        }
+      )
+    }
+
+    wrapper.addEventListener('scroll', handleScroll, { passive: true })
+    return () => wrapper.removeEventListener('scroll', handleScroll)
+  }, [isScrollMode, transform, updateTransform])
 
   const baseWrapperStyle = {
     position: 'relative',
@@ -213,50 +232,39 @@ export const VirtualPaper = ({
     minScale,
     maxScale,
     updateTransform,
-    endTransform
+    endTransform,
+    isScrollMode
   })
 
   // --- 渲染分支 ---
   // Transform 模式（默认）：单层 container，CSS transform: translate3d + scale 驱动平移+缩放
-  // Scroll 模式：4 层 wrapper > scrollSurface > scaledBox[containerRef] > scaler[measureRef]
-  //   - scrollSurface: position:absolute, width/height = surface 几何（撑开滚动区供程序化 scroll；
-  //     absolute 而非 relative，避免无 specified height 的父级下撑开 wrapper.clientHeight）
-  //   - scaledBox: position:absolute, left/top=origin, width/height=scaled（containerRef 指向此层，
-  //     与 transform 模式 container 语义对应，供 initial placement 测量内容尺寸）
-  //   - scaler: transform:scale(s), width/height=base（measureRef 指向此层测 offset；
-  //     user-visible 的 containerStyle/ClassName/testid 应用到此层）
+  // Scroll 模式：2 层 wrapper(overflow:auto) > container(文档流宽高缩放)
   if (isScrollMode) {
-    const scaledWidth = scrollBaseSize.width * transform.scale
-    const scaledHeight = scrollBaseSize.height * transform.scale
-    // position:absolute 让 scrollSurface 脱离文档流不撑开 wrapper.clientHeight
-    // （wrapper.height:100% 在父无 specified height 时会退化 auto，relative 子元素会撑开它）
-    // absolute 子元素仍参与 wrapper 的 scrollable overflow（overflow:hidden），几何不变
-    const scrollSurfaceStyles: CSSProperties = {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      width: scrollGeometry.surfaceWidth,
-      height: scrollGeometry.surfaceHeight
+    const scaledWidth = scrollBaseSize.width > 0
+      ? scrollBaseSize.width * transform.scale
+      : 'auto'
+    const scaledHeight = scrollBaseSize.height > 0
+      ? scrollBaseSize.height * transform.scale
+      : 'auto'
+
+    const scrollWrapperStyles: CSSProperties = {
+      ...baseWrapperStyle,
+      overflow: 'auto',
+      touchAction: 'none',
+      ...style,
+      ...wrapperPropsStyle
     }
-    const scrollBoxStyles: CSSProperties = {
-      position: 'absolute',
-      left: scrollGeometry.originX,
-      top: scrollGeometry.originY,
-      width: scaledWidth,
-      height: scaledHeight
-    }
-    const scrollScalerStyles: CSSProperties = {
+    // 注意：scroll 模式下 width/height 由 scale * contentSize 决定，是渲染模式的内在属性，
+    // 不允许被用户的 containerStyle/containerPropsStyle 覆盖（否则缩放失效）。
+    // 因此 scaled 尺寸必须放在 spread 之后，确保最高优先级。
+    const scrollContainerStyles: CSSProperties = {
       position: 'relative',
-      transformOrigin: '0 0',
-      willChange: 'transform',
       touchAction: 'none',
       userSelect: 'none',
       ...containerStyle,
       ...containerPropsStyle,
-      transform: `scale(${transform.scale})`,
-      // 未测量且无 contentSize 时用 auto 让 children 撑开，避免 0 宽度导致测量死循环
-      width: scrollBaseSize.width > 0 ? scrollBaseSize.width : 'auto',
-      height: scrollBaseSize.height > 0 ? scrollBaseSize.height : 'auto'
+      width: scaledWidth,
+      height: scaledHeight
     }
     return (
       <div
@@ -264,29 +272,16 @@ export const VirtualPaper = ({
         ref={wrapperRef}
         data-testid={wrapperDataTestId}
         className={wrapperClassNames}
-        style={wrapperStyles}
+        style={scrollWrapperStyles}
       >
         <div
-          data-testid="virtual-paper-scroll-surface"
-          className="virtual-paper-scroll-surface"
-          style={scrollSurfaceStyles}
+          {...restContainerProps}
+          ref={containerRef}
+          data-testid={containerDataTestId}
+          className={containerClassNames}
+          style={scrollContainerStyles}
         >
-          <div
-            ref={containerRef}
-            data-testid="virtual-paper-scroll-box"
-            className="virtual-paper-scroll-box"
-            style={scrollBoxStyles}
-          >
-            <div
-              {...restContainerProps}
-              ref={measureRef}
-              data-testid={containerDataTestId}
-              className={containerClassNames}
-              style={scrollScalerStyles}
-            >
-              {children}
-            </div>
-          </div>
+          {children}
         </div>
       </div>
     )
