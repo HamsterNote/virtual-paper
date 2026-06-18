@@ -4,7 +4,6 @@ export enum VirtualPaperInteractionMode {
   MouseWheelZoom = 'MouseWheelZoom',
   MouseDragPan = 'MouseDragPan',
   TrackpadScrollPan = 'TrackpadScrollPan',
-  TrackpadPinchZoom = 'TrackpadPinchZoom',
   MouseWheelCtrlZoom = 'MouseWheelCtrlZoom',
   TouchSingleFingerPan = 'TouchSingleFingerPan',
   TouchTwoFingerPan = 'TouchTwoFingerPan',
@@ -72,7 +71,7 @@ export type UseVirtualPaperInteractionArgs = {
 
 export const DEFAULT_ENABLED_INTERACTIONS = [
   VirtualPaperInteractionMode.TrackpadScrollPan,
-  VirtualPaperInteractionMode.TrackpadPinchZoom,
+  VirtualPaperInteractionMode.MouseWheelCtrlZoom,
   VirtualPaperInteractionMode.TouchTwoFingerPan,
   VirtualPaperInteractionMode.TouchTwoFingerZoom
 ]

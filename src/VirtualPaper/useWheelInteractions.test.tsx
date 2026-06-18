@@ -1,3 +1,4 @@
+import '@testing-library/jest-dom/vitest'
 import { cleanup, render, screen, act } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useRef, useState } from 'react'
@@ -185,7 +186,7 @@ describe('useWheelInteractions', () => {
 
     render(
       <WheelHarness
-        enabledInteractions={[VirtualPaperInteractionMode.TrackpadPinchZoom]}
+        enabledInteractions={[VirtualPaperInteractionMode.MouseWheelCtrlZoom]}
         initialTransform={{ x: 0, y: 0, scale: 1 }}
         onUpdate={onUpdate}
       />
@@ -206,7 +207,7 @@ describe('useWheelInteractions', () => {
     expect(next.x + contentX * next.scale).toBeCloseTo(localX)
     expect(next.y + contentY * next.scale).toBeCloseTo(localY)
     expect(onUpdate.mock.calls[0][1]).toEqual({
-      source: VirtualPaperInteractionMode.TrackpadPinchZoom,
+      source: VirtualPaperInteractionMode.MouseWheelCtrlZoom,
       inputType: 'wheel',
       phase: 'change'
     })

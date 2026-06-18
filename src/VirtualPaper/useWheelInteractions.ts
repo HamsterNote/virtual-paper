@@ -97,13 +97,8 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
       let source: VirtualPaperInteractionMode | null = null
 
       if (event.ctrlKey || event.metaKey) {
-        if (hasInteraction(VirtualPaperInteractionMode.TrackpadPinchZoom)) {
-          source = VirtualPaperInteractionMode.TrackpadPinchZoom
-        } else if (hasInteraction(VirtualPaperInteractionMode.MouseWheelCtrlZoom)) {
+        if (hasInteraction(VirtualPaperInteractionMode.MouseWheelCtrlZoom) && wrapper) {
           source = VirtualPaperInteractionMode.MouseWheelCtrlZoom
-        }
-
-        if (source && wrapper) {
           nextTransform = getWheelZoomTransform(
             event,
             wrapper,

@@ -150,8 +150,28 @@ const chooseGestureSource = (
     : activeGesture.panSource
 }
 
+const computeWrapperLocalMidpoint = (
+  fingers: Finger[],
+  wrapper: HTMLElement | null
+): { x: number; y: number } | null => {
+  if (!wrapper || fingers.length < 2) return null
+  const rect = wrapper.getBoundingClientRect()
+  let sumX = 0
+  let sumY = 0
+  let counted = 0
+  for (const finger of fingers) {
+    const point = finger.getLastOperation()?.point
+    if (!point) return null
+    sumX += point.x - rect.left
+    sumY += point.y - rect.top
+    counted += 1
+  }
+  return counted >= 2 ? { x: sumX / counted, y: sumY / counted } : null
+}
+
 export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): void {
   const {
+    wrapperRef,
     containerRef,
     transform,
     enabledInteractions,
@@ -167,6 +187,20 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
   const updateTransformRef = useRef(updateTransform)
   const endTransformRef = useRef(endTransform)
   const activeGestureRef = useRef<ActivePointerGesture | null>(null)
+  const zoomSegmentRef = useRef<{
+    startTransform: VirtualPaperTransform
+    startMid: { x: number; y: number }
+  } | null>(null)
+  // 标记当前手势期间是否真的发生过锚点缩放。
+  // 用于在手指抬起（phase: 'end'）但锚点 midpoint 已不可算时，冻结位置
+  // 而非套用控制器累积的孤儿位移（修复双指缩放 TouchEnd 跳变）。
+  const didScaleDuringGestureRef = useRef(false)
+  // 预防式屏蔽 flag：从双指缩放（multi）过渡到单指 pan（single）后，
+  // 剩下那根手指的后续 move 不应再触发任何 pan 更新。
+  // 否则控制器在 multi 期间独立累积的 pose.position 会被当成新位移叠加，造成跳变。
+  // 参考 painting 的 singleTrackingDisabledUntilReset 机制（adapter 层预防）。
+  // 在 multi→single 转换时置 true，在 AllEnd（所有手指抬起）时清空。
+  const singlePanBlockedAfterMultiRef = useRef(false)
 
   transformRef.current = transform
   minScaleRef.current = minScale
@@ -179,6 +213,8 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
   useEffect(() => {
     const element = containerRef.current
     if (!element || !hasPointerModes(flags)) return
+
+    let mixin: Mixin | null = null
 
     const getPose = (target: HTMLElement): Pose => {
       const rect = target.getBoundingClientRect()
@@ -213,12 +249,52 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
 
       if (!source) return
 
-      const deltaX = nextPosition.x - currentPose.position.x
-      const deltaY = nextPosition.y - currentPose.position.y
-      const nextTransform: VirtualPaperTransform = {
-        x: currentTransform.x + deltaX,
-        y: currentTransform.y + deltaY,
-        scale: nextScale
+      // 预防式屏蔽：multi→single 转换后，剩下那根手指的所有后续 pan 更新都直接丢弃。
+      // 这覆盖了 didScaleDuringGestureRef freeze 漏掉的 phase==='change' 场景
+      // （即"抬起一指后剩下手指继续 move"时的位移叠加跳变）。
+      if (
+        source === VirtualPaperInteractionMode.TouchSingleFingerPan &&
+        singlePanBlockedAfterMultiRef.current
+      ) {
+        return
+      }
+
+      const segment = zoomSegmentRef.current
+      const currentMid = computeWrapperLocalMidpoint(
+        mixin?.getFingers() ?? [],
+        wrapperRef.current
+      )
+      const isAnchorZoom =
+        source === VirtualPaperInteractionMode.TouchTwoFingerZoom &&
+        segment !== null &&
+        currentMid !== null
+
+      let nextTransform: VirtualPaperTransform
+      if (isAnchorZoom && segment && currentMid) {
+        const startTransform = segment.startTransform
+        const startMid = segment.startMid
+        const contentX = (startMid.x - startTransform.x) / startTransform.scale
+        const contentY = (startMid.y - startTransform.y) / startTransform.scale
+        nextTransform = {
+          x: currentMid.x - contentX * nextScale,
+          y: currentMid.y - contentY * nextScale,
+          scale: nextScale
+        }
+        didScaleDuringGestureRef.current = true
+      } else if (phase === 'end' && didScaleDuringGestureRef.current) {
+        // 缩放手势收尾，但此时手指已抬起导致锚点 midpoint 不可用。
+        // 上一次 move 已应用了正确的锚点变换，这里冻结当前位置，避免把控制器
+        // 在缩放期间独立累积、却从未被锚点分支使用过的 pose.position 当成新位移叠加
+        // （即双指缩放 TouchEnd 跳变 bug）。
+        nextTransform = { ...currentTransform, scale: nextScale }
+      } else {
+        const deltaX = nextPosition.x - currentPose.position.x
+        const deltaY = nextPosition.y - currentPose.position.y
+        nextTransform = {
+          x: currentTransform.x + deltaX,
+          y: currentTransform.y + deltaY,
+          scale: nextScale
+        }
       }
       const meta = {
         source,
@@ -243,30 +319,78 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
       passive: false
     }
 
-    const mixin = new Mixin(
+    const trackGesture = (fingers: Finger[]) => {
+      const previousGesture = activeGestureRef.current
+      const nextGesture = getActivePointerGesture(fingers, flags)
+
+      // 检测 multi→single 转换：
+      //   之前 activeGestureRef.zoomSource 存在（处于双指缩放）
+      //   现在 fingers.length === 1 且 nextGesture 解析为单指 pan
+      // 此刻置 flag，让 applyPose 后续屏蔽剩下手指的 move（避免位移叠加跳变）。
+      // 注意：本回调由 'end' / 'move' 事件触发，在 setPoseOnEnd / setPose 之后执行，
+      //       所以对"当前这一帧"的 setPoseOnEnd 无影响（那一帧仍走 didScaleDuringGestureRef freeze），
+      //       但对"下一帧"剩下的手指 move 生效。
+      const wasMultiZoom = !!previousGesture?.zoomSource
+      const isNowSingleTouchPan =
+        fingers.length === 1 &&
+        nextGesture?.panSource === VirtualPaperInteractionMode.TouchSingleFingerPan
+      if (wasMultiZoom && isNowSingleTouchPan) {
+        singlePanBlockedAfterMultiRef.current = true
+      }
+
+      activeGestureRef.current = nextGesture
+    }
+    const captureZoomSegment = (fingers: Finger[]) => {
+      if (!activeGestureRef.current?.zoomSource) {
+        zoomSegmentRef.current = null
+        return
+      }
+      const mid = computeWrapperLocalMidpoint(fingers, wrapperRef.current)
+      if (!mid) {
+        zoomSegmentRef.current = null
+        return
+      }
+      zoomSegmentRef.current = {
+        startTransform: { ...transformRef.current },
+        startMid: mid
+      }
+    }
+    const clearGesture = () => {
+      activeGestureRef.current = null
+      zoomSegmentRef.current = null
+      didScaleDuringGestureRef.current = false
+      singlePanBlockedAfterMultiRef.current = false
+    }
+
+    mixin = new Mixin(
       element,
       options,
       getMixinTypes(flags),
       getSingleFingerMixinTypes(flags)
     )
 
-    const trackGesture = (fingers: Finger[]) => {
-      activeGestureRef.current = getActivePointerGesture(fingers, flags)
-    }
-    const clearGesture = () => {
-      activeGestureRef.current = null
-    }
-
-    mixin.addEventListener(DragOperationType.Start, trackGesture)
+    mixin.addEventListener(DragOperationType.Start, (fingers) => {
+      didScaleDuringGestureRef.current = false
+      trackGesture(fingers)
+      captureZoomSegment(fingers)
+    })
     mixin.addEventListener(DragOperationType.Move, trackGesture)
+    mixin.addEventListener(DragOperationType.End, (fingers) => {
+      trackGesture(fingers)
+      captureZoomSegment(fingers)
+    })
     mixin.addEventListener(DragOperationType.AllEnd, clearGesture)
 
     return () => {
       activeGestureRef.current = null
-      mixin.destroy()
+      zoomSegmentRef.current = null
+      didScaleDuringGestureRef.current = false
+      singlePanBlockedAfterMultiRef.current = false
+      mixin?.destroy()
     }
   }, [
     containerRef,
+    wrapperRef,
     flags.mouseDragPan,
     flags.touchSingleFingerPan,
     flags.touchTwoFingerPan,

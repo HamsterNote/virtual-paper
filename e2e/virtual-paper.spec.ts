@@ -105,7 +105,7 @@ test.describe('VirtualPaper Browser Gestures', () => {
 
   test('Ctrl wheel zoom', async ({ page }) => {
     await expect(
-      page.locator('[data-testid="mode-toggle-TrackpadPinchZoom"]')
+      page.locator('[data-testid="mode-toggle-MouseWheelCtrlZoom"]')
     ).toBeChecked()
 
     const wrapper = page.locator('[data-testid="virtual-paper-wrapper"]')

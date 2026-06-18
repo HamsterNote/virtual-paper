@@ -403,7 +403,7 @@ describe('VirtualPaper', () => {
       getLatestWheelArgs().updateTransform(
         { x: 10, y: 20, scale: 1 },
         {
-          source: VirtualPaperInteractionMode.TrackpadPinchZoom,
+          source: VirtualPaperInteractionMode.MouseWheelCtrlZoom,
           inputType: 'wheel',
           phase: 'change'
         }
@@ -421,7 +421,7 @@ describe('VirtualPaper', () => {
     expect(onTransformChange).toHaveBeenNthCalledWith(
       1,
       { x: 10, y: 20, scale: 1 },
-      expect.objectContaining({ source: VirtualPaperInteractionMode.TrackpadPinchZoom })
+      expect.objectContaining({ source: VirtualPaperInteractionMode.MouseWheelCtrlZoom })
     )
     expect(onTransformChange).toHaveBeenNthCalledWith(
       2,
@@ -532,7 +532,7 @@ describe('VirtualPaper', () => {
 
     const expectedDefaults = [
       VirtualPaperInteractionMode.TrackpadScrollPan,
-      VirtualPaperInteractionMode.TrackpadPinchZoom,
+      VirtualPaperInteractionMode.MouseWheelCtrlZoom,
       VirtualPaperInteractionMode.TouchTwoFingerPan,
       VirtualPaperInteractionMode.TouchTwoFingerZoom
     ]
