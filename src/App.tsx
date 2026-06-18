@@ -3,6 +3,7 @@ import {
   VirtualPaper,
   VirtualPaperInteractionMode,
   VirtualPaperInitialPlacement,
+  VirtualPaperRenderMode,
   DEFAULT_ENABLED_INTERACTIONS
 } from './index'
 import type { VirtualPaperTransform } from './index'
@@ -17,6 +18,8 @@ export default function App() {
   const [initialPlacement, setInitialPlacement] = useState(
     VirtualPaperInitialPlacement.Center
   )
+
+  const [renderMode, setRenderMode] = useState(VirtualPaperRenderMode.Transform)
 
   const [isControlled, setIsControlled] = useState(false)
 
@@ -80,6 +83,28 @@ export default function App() {
     <div className="demo-shell">
       <aside className="controls-panel">
         <h2>VirtualPaper 控制器</h2>
+
+        <section className="control-section">
+          <h3>渲染模式</h3>
+          <label className="mode-toggle">
+            <input
+              type="radio"
+              data-testid="render-mode-Transform"
+              checked={renderMode === VirtualPaperRenderMode.Transform}
+              onChange={() => setRenderMode(VirtualPaperRenderMode.Transform)}
+            />
+            <span>Transform (translate + scale)</span>
+          </label>
+          <label className="mode-toggle">
+            <input
+              type="radio"
+              data-testid="render-mode-Scroll"
+              checked={renderMode === VirtualPaperRenderMode.Scroll}
+              onChange={() => setRenderMode(VirtualPaperRenderMode.Scroll)}
+            />
+            <span>Scroll (宽高 + scrollLeft)</span>
+          </label>
+        </section>
 
         <section className="control-section">
           <h3>交互模式</h3>
@@ -189,6 +214,8 @@ export default function App() {
           key={remountKey}
           enabledInteractions={enabledInteractions}
           initialPlacement={initialPlacement}
+          renderMode={renderMode}
+          contentSize={{ width: 600, height: 400 }}
           {...(isControlled ? { transform: controlledTransform } : {})}
           onTransformChange={handleTransformChange}
         >
