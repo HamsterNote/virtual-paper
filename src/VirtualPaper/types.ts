@@ -72,6 +72,6 @@ export type UseVirtualPaperInteractionArgs = {
 export const DEFAULT_ENABLED_INTERACTIONS = [
   VirtualPaperInteractionMode.TrackpadScrollPan,
   VirtualPaperInteractionMode.MouseWheelCtrlZoom,
-  VirtualPaperInteractionMode.TouchTwoFingerPan,
+  VirtualPaperInteractionMode.TouchSingleFingerPan,
   VirtualPaperInteractionMode.TouchTwoFingerZoom
 ]

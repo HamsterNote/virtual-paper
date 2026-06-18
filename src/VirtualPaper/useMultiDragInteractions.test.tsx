@@ -205,6 +205,24 @@ describe('useMultiDragInteractions', () => {
     Element.prototype.getBoundingClientRect = originalGetBoundingClientRect
   })
 
+  // ─────────────────────────────────────────────────────────────────────
+  // 用户报告：鼠标可以在 wrapper 触发，但 Touch（pointer）只能在 container 触发。
+  // 原因：Mixin 绑定在 containerRef，库内部 element.addEventListener('pointerdown')
+  //       让事件只在 container 区域响应；wrapper 中超出 container 的空白区域
+  //       接不到 touch。
+  // 修复：把 Mixin 绑到 wrapperRef（更大的命中区），transform 仍作用于 container
+  //       —— 因为 applyPose 内部读 transformRef、写 updateTransform，与 target
+  //       元素无关。
+  // ─────────────────────────────────────────────────────────────────────
+  it('attaches the multi-drag Mixin to the wrapper element so touches outside the container still fire', () => {
+    render(<TestHarness />)
+    const instance = getLastInstance()
+    const wrapper = screen.getByTestId('wrapper')
+    const container = screen.getByTestId('container')
+    expect(instance.element).toBe(wrapper)
+    expect(instance.element).not.toBe(container)
+  })
+
   it('cleans up active mixins under StrictMode across repeated mounts', () => {
     const first = render(
       <StrictMode>

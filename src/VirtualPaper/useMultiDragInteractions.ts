@@ -211,7 +211,7 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
   const flags = getPointerModeFlags(enabledInteractions)
 
   useEffect(() => {
-    const element = containerRef.current
+    const element = wrapperRef.current
     if (!element || !hasPointerModes(flags)) return
 
     let mixin: Mixin | null = null
