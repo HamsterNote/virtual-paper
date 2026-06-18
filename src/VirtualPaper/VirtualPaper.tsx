@@ -132,19 +132,29 @@ export const VirtualPaper = ({
     }
   }, [isScrollMode, transform.x, transform.y])
 
+  // 用 ref 持有最新 transform，避免 scroll handler 闭包过期。
+  // 场景：滚动期间触发 ctrl+wheel 缩放时，闭包里的 transform.scale 会过期，
+  // 后续 scroll 事件会用 stale scale 覆盖最新值，导致缩放被回退。
+  const transformRef = useRef(transform)
+  useEffect(() => {
+    transformRef.current = transform
+  }, [transform])
+
   // scroll 模式：原生滚动位置 → transform state。
   // 写 scroll 后触发的 scroll 事件会因值相等 bail out，避免同步循环。
+  // 依赖只放 isScrollMode + updateTransform，scroll handler 通过 transformRef 读最新值。
   useEffect(() => {
     if (!isScrollMode) return
     const wrapper = wrapperRef.current
     if (!wrapper) return
 
     const handleScroll = () => {
+      const currentTransform = transformRef.current
       const newX = -wrapper.scrollLeft
       const newY = -wrapper.scrollTop
-      if (transform.x === newX && transform.y === newY) return
+      if (currentTransform.x === newX && currentTransform.y === newY) return
       updateTransform(
-        { ...transform, x: newX, y: newY },
+        { ...currentTransform, x: newX, y: newY },
         {
           source: VirtualPaperInteractionMode.TrackpadScrollPan,
           inputType: 'wheel',
@@ -155,7 +165,7 @@ export const VirtualPaper = ({
 
     wrapper.addEventListener('scroll', handleScroll, { passive: true })
     return () => wrapper.removeEventListener('scroll', handleScroll)
-  }, [isScrollMode, transform, updateTransform])
+  }, [isScrollMode, updateTransform])
 
   const baseWrapperStyle = {
     position: 'relative',

@@ -34,8 +34,8 @@ export type VirtualPaperTransform = { x: number; y: number; scale: number }
  * scroll 模式下内容的未缩放基础尺寸。
  *
  * scroll 模式必须知道内容的原始尺寸才能计算 container 的宽高（= 基础 × scale）。
- * 若未提供，组件会通过 ResizeObserver 测量 scaler 元素的 offset 尺寸；
- * 但当 children 为绝对定位等不参与正常流时，测量可能为 0，此时应显式提供。
+ * 必须由调用方显式提供：未提供时 baseSize 退化为 0×0，container 宽高为 'auto'，
+ * 缩放与原生滚动几何将不会按预期工作。
  */
 export type VirtualPaperContentSize = { width: number; height: number }
 
@@ -62,7 +62,7 @@ export type VirtualPaperProps = {
   renderMode?: VirtualPaperRenderMode
   /**
    * scroll 模式下内容的未缩放基础尺寸。
-   * 未提供时通过 ResizeObserver 测量；对不参与正常流的 children 建议显式提供。
+   * 必须显式提供：未提供时 container 宽高为 'auto'，缩放将无法工作。
    * 仅在 renderMode === Scroll 时生效。
    */
   contentSize?: VirtualPaperContentSize
