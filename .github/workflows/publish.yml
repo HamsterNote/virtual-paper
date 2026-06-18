@@ -33,7 +33,7 @@ jobs:
       - name: Build library
         run: yarn build:lib
 
-      - name: Extract version from tag
+      - name: Extract version info from tag
         id: version
         run: |
           # 去掉 v 前缀
@@ -41,7 +41,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           
           # 判断是否为 beta 版本
-          if [[ "$VERSION" == *"-beta."* ]]; then
+          if [[ "$VERSION" == *"-beta"* ]]; then
             echo "tag=beta" >> $GITHUB_OUTPUT
             echo "publish_tag=--tag beta" >> $GITHUB_OUTPUT
           else
@@ -49,10 +49,15 @@ jobs:
             echo "publish_tag=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Update package version
+      - name: Verify package version matches tag
         run: |
-          # 更新 package.json 中的版本号
-          npm version ${{ steps.version.outputs.version }} --no-git-tag-version
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ package.json version ($PKG_VERSION) does not match tag version ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "✅ Version verified: $PKG_VERSION"
 
       - name: Publish to NPM
         run: npm publish --access public ${{ steps.version.outputs.publish_tag }}
