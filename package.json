@@ -3,34 +3,63 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "./dist/virtual-paper.umd.js",
+  "module": "./dist/virtual-paper.es.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/virtual-paper.es.js",
+      "require": "./dist/virtual-paper.umd.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
   "packageManager": "yarn@1.22.22",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 9826",
     "build": "tsc -b && vite build",
+    "build:lib": "vite build --config vite.lib.config.ts",
+    "build:demo": "yarn build",
+    "build:all": "yarn build:lib && yarn build:demo",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
     "preview": "vite preview --host 0.0.0.0 --port 9826",
     "lint": "eslint . --max-warnings 0",
     "format": "prettier . --write",
     "format:check": "prettier . --check"
   },
   "dependencies": {
-    "@system-ui-js/multi-drag": "^0.4.0",
+    "@system-ui-js/multi-drag": "^0.4.0"
+  },
+  "peerDependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@eslint/js": "latest",
-    "@vitejs/plugin-react": "latest",
+    "@playwright/test": "^1.61.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
     "eslint": "latest",
     "eslint-config-standard": "latest",
     "eslint-plugin-import": "latest",
     "eslint-plugin-n": "latest",
     "eslint-plugin-promise": "latest",
     "globals": "latest",
+    "jsdom": "^29.1.1",
     "prettier": "latest",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "typescript": "6.0.3",
     "typescript-eslint": "latest",
-    "vite": "latest"
+    "vite": "latest",
+    "vite-plugin-dts": "^5.0.2",
+    "vitest": "^4.1.9"
   }
 }

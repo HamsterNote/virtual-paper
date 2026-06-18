@@ -1,184 +1,251 @@
-import { Drag, DragOperationType, type Finger } from '@system-ui-js/multi-drag'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
+import {
+  VirtualPaper,
+  VirtualPaperInteractionMode,
+  VirtualPaperInitialPlacement,
+  VirtualPaperRenderMode,
+  DEFAULT_ENABLED_INTERACTIONS
+} from './index'
+import type { VirtualPaperTransform } from './index'
 
-interface CardModel {
-  id: string
-  title: string
-  detail: string
-  color: string
-  left: number
-  top: number
-}
-
-interface DragStatus {
-  cardTitle: string
-  phase: DragOperationType | 'ready'
-  fingerCount: number
-  lastPoint: string
-}
-
-const cards: CardModel[] = [
-  {
-    id: 'quick-note',
-    title: '单指拖动',
-    detail: '按住便签任意位置移动。',
-    color: '#f6b26b',
-    left: 42,
-    top: 44
-  },
-  {
-    id: 'multi-touch',
-    title: '多指捕获',
-    detail: '触屏上可同时记录多个 pointer。',
-    color: '#a6cbd9',
-    left: 288,
-    top: 134
-  },
-  {
-    id: 'inertia',
-    title: '惯性余韵',
-    detail: '快速甩动后观察尾随运动。',
-    color: '#d8c177',
-    left: 142,
-    top: 300
-  }
-]
-
-const getLastPoint = (fingers: Finger[]) => {
-  const lastFinger = fingers.at(-1)
-  const lastOperation = lastFinger?.getLastOperation()
-
-  if (!lastOperation) {
-    return '等待触摸或鼠标按下'
-  }
-
-  return `${Math.round(lastOperation.point.x)}, ${Math.round(lastOperation.point.y)}`
-}
+const ALL_MODES = Object.values(VirtualPaperInteractionMode)
 
 export default function App() {
-  const cardRefs = useRef<Record<string, HTMLButtonElement | null>>({})
-  const [status, setStatus] = useState<DragStatus>({
-    cardTitle: '拖动任意便签开始',
-    phase: 'ready',
-    fingerCount: 0,
-    lastPoint: '等待触摸或鼠标按下'
-  })
+  const [enabledInteractions, setEnabledInteractions] = useState<
+    VirtualPaperInteractionMode[]
+  >(DEFAULT_ENABLED_INTERACTIONS)
 
-  useEffect(() => {
-    const draggers = cards.flatMap((card) => {
-      const element = cardRefs.current[card.id]
+  const [initialPlacement, setInitialPlacement] = useState(
+    VirtualPaperInitialPlacement.Center
+  )
 
-      if (!element) {
-        return []
-      }
+  const [renderMode, setRenderMode] = useState(VirtualPaperRenderMode.Transform)
 
-      const dragger = new Drag(element, { inertial: true })
-      const updateStatus =
-        (phase: DragOperationType) => (fingers: Finger[]) => {
-          setStatus({
-            cardTitle: card.title,
-            phase,
-            fingerCount: fingers.length,
-            lastPoint: getLastPoint(fingers)
-          })
-        }
+  const [isControlled, setIsControlled] = useState(false)
 
-      dragger.addEventListener(
-        DragOperationType.Start,
-        updateStatus(DragOperationType.Start)
-      )
-      dragger.addEventListener(
-        DragOperationType.Move,
-        updateStatus(DragOperationType.Move)
-      )
-      dragger.addEventListener(
-        DragOperationType.End,
-        updateStatus(DragOperationType.End)
-      )
-      dragger.addEventListener(
-        DragOperationType.Inertial,
-        updateStatus(DragOperationType.Inertial)
-      )
-      dragger.addEventListener(DragOperationType.AllEnd, () => {
-        setStatus((current) => ({
-          ...current,
-          phase: DragOperationType.AllEnd,
-          fingerCount: 0
-        }))
-      })
+  const [controlledTransform, setControlledTransform] =
+    useState<VirtualPaperTransform>({ x: 0, y: 0, scale: 1 })
 
-      return [dragger]
-    })
+  const [readoutTransform, setReadoutTransform] =
+    useState<VirtualPaperTransform>({ x: 0, y: 0, scale: 1 })
 
-    return () => {
-      draggers.forEach((dragger) => {
-        dragger.destroy()
-      })
-    }
+  const [remountKey, setRemountKey] = useState(0)
+
+  const [controlledX, setControlledX] = useState('0')
+  const [controlledY, setControlledY] = useState('0')
+  const [controlledScale, setControlledScale] = useState('1')
+
+  const toggleMode = useCallback((mode: VirtualPaperInteractionMode) => {
+    setEnabledInteractions((prev) =>
+      prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode]
+    )
   }, [])
 
+  const handlePlacementChange = useCallback(
+    (placement: VirtualPaperInitialPlacement) => {
+      setInitialPlacement(placement)
+      setRemountKey((k) => k + 1)
+    },
+    []
+  )
+
+  const handleControlledToggle = useCallback(
+    (checked: boolean) => {
+      setIsControlled(checked)
+      if (checked) {
+        setControlledX(String(controlledTransform.x))
+        setControlledY(String(controlledTransform.y))
+        setControlledScale(String(controlledTransform.scale))
+      }
+    },
+    [controlledTransform]
+  )
+
+  const applyControlledTransform = useCallback(() => {
+    const x = parseFloat(controlledX) || 0
+    const y = parseFloat(controlledY) || 0
+    const scale = parseFloat(controlledScale) || 1
+    setControlledTransform({ x, y, scale })
+  }, [controlledX, controlledY, controlledScale])
+
+  const handleReset = useCallback(() => {
+    setRemountKey((k) => k + 1)
+  }, [])
+
+  const handleTransformChange = useCallback(
+    (transform: VirtualPaperTransform) => {
+      setReadoutTransform(transform)
+    },
+    []
+  )
+
   return (
-    <main className="shell">
-      <section className="hero" aria-labelledby="page-title">
-        <p className="eyebrow">@system-ui-js/multi-drag</p>
-        <h1 id="page-title">指尖拖拽实验台</h1>
-        <p className="lede">
-          用手指或鼠标拖动卡片，观察 multi-drag
-          手势事件如何驱动画布里的多个对象。
-        </p>
-      </section>
+    <div className="demo-shell">
+      <aside className="controls-panel">
+        <h2>VirtualPaper 控制器</h2>
 
-      <section className="demo-grid" aria-label="multi-drag 指拖动演示">
-        <section className="stage" aria-label="可拖动区域">
-          <div className="stage-ruler stage-ruler-one" />
-          <div className="stage-ruler stage-ruler-two" />
+        <section className="control-section">
+          <h3>渲染模式</h3>
+          <label className="mode-toggle">
+            <input
+              type="radio"
+              data-testid="render-mode-Transform"
+              checked={renderMode === VirtualPaperRenderMode.Transform}
+              onChange={() => setRenderMode(VirtualPaperRenderMode.Transform)}
+            />
+            <span>Transform (translate + scale)</span>
+          </label>
+          <label className="mode-toggle">
+            <input
+              type="radio"
+              data-testid="render-mode-Scroll"
+              checked={renderMode === VirtualPaperRenderMode.Scroll}
+              onChange={() => setRenderMode(VirtualPaperRenderMode.Scroll)}
+            />
+            <span>Scroll (宽高 + scrollLeft)</span>
+          </label>
+        </section>
 
-          {cards.map((card) => (
-            <button
-              key={card.id}
-              ref={(element) => {
-                cardRefs.current[card.id] = element
-              }}
-              className="drag-card"
-              style={{
-                backgroundColor: card.color,
-                left: card.left,
-                top: card.top
-              }}
-              type="button"
-              aria-label={`拖动 ${card.title}`}
-            >
-              <span>{card.title}</span>
-              <small>{card.detail}</small>
-            </button>
+        <section className="control-section">
+          <h3>交互模式</h3>
+          {ALL_MODES.map((mode) => (
+            <label key={mode} className="mode-toggle">
+              <input
+                type="checkbox"
+                data-testid={`mode-toggle-${mode}`}
+                checked={enabledInteractions.includes(mode)}
+                onChange={() => toggleMode(mode)}
+              />
+              <span>{mode}</span>
+            </label>
           ))}
         </section>
 
-        <aside className="status-panel" aria-live="polite">
-          <p className="panel-kicker">Gesture snapshot</p>
-          <dl>
-            <div>
-              <dt>目标</dt>
-              <dd>{status.cardTitle}</dd>
+        <section className="control-section">
+          <h3>初始位置</h3>
+          <select
+            data-testid="placement-select"
+            value={initialPlacement}
+            onChange={(e) =>
+              handlePlacementChange(
+                e.target.value as VirtualPaperInitialPlacement
+              )
+            }
+          >
+            <option value={VirtualPaperInitialPlacement.Center}>
+              Center
+            </option>
+            <option value={VirtualPaperInitialPlacement.TopLeft}>
+              TopLeft
+            </option>
+          </select>
+        </section>
+
+        <section className="control-section">
+          <h3>受控模式</h3>
+          <label className="mode-toggle">
+            <input
+              type="checkbox"
+              data-testid="controlled-toggle"
+              checked={isControlled}
+              onChange={(e) => handleControlledToggle(e.target.checked)}
+            />
+            <span>启用受控模式</span>
+          </label>
+
+          {isControlled && (
+            <div className="controlled-inputs">
+              <label>
+                X
+                <input
+                  type="number"
+                  data-testid="controlled-x-input"
+                  value={controlledX}
+                  onChange={(e) => setControlledX(e.target.value)}
+                />
+              </label>
+              <label>
+                Y
+                <input
+                  type="number"
+                  data-testid="controlled-y-input"
+                  value={controlledY}
+                  onChange={(e) => setControlledY(e.target.value)}
+                />
+              </label>
+              <label>
+                Scale
+                <input
+                  type="number"
+                  data-testid="controlled-scale-input"
+                  step="0.1"
+                  value={controlledScale}
+                  onChange={(e) => setControlledScale(e.target.value)}
+                />
+              </label>
+              <button
+                data-testid="apply-controlled-transform"
+                onClick={applyControlledTransform}
+              >
+                应用
+              </button>
             </div>
-            <div>
-              <dt>阶段</dt>
-              <dd>{status.phase}</dd>
-            </div>
-            <div>
-              <dt>手指 / pointer 数</dt>
-              <dd>{status.fingerCount}</dd>
-            </div>
-            <div>
-              <dt>最后坐标</dt>
-              <dd>{status.lastPoint}</dd>
-            </div>
-          </dl>
-          <p className="hint">
-            手机或平板访问同一局域网地址即可触摸测试；桌面浏览器可用鼠标模拟单指拖动。
-          </p>
-        </aside>
-      </section>
-    </main>
+          )}
+        </section>
+
+        <section className="control-section">
+          <button data-testid="reset-transform" onClick={handleReset}>
+            重置
+          </button>
+        </section>
+
+        <section className="control-section">
+          <h3>当前变换</h3>
+          <div data-testid="transform-readout">
+            x: {readoutTransform.x.toFixed(2)}, y:{' '}
+            {readoutTransform.y.toFixed(2)}, scale:{' '}
+            {readoutTransform.scale.toFixed(3)}
+          </div>
+        </section>
+      </aside>
+
+      <main className="paper-stage">
+        <VirtualPaper
+          key={remountKey}
+          enabledInteractions={enabledInteractions}
+          initialPlacement={initialPlacement}
+          renderMode={renderMode}
+          contentSize={{ width: 600, height: 400 }}
+          // transform 模式下 container 需显式尺寸（子元素用 100% 撑满）；
+          // scroll 模式下此值被 scaledWidth/Height 覆盖
+          containerStyle={{ width: 600, height: 400 }}
+          {...(isControlled ? { transform: controlledTransform } : {})}
+          onTransformChange={handleTransformChange}
+        >
+          <div
+            style={{
+              width: '100%',
+              height: '100%',
+              background: '#f0f0f0',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: 10,
+              padding: 20
+            }}
+          >
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div
+                key={i}
+                style={{
+                  background: '#3498db',
+                  borderRadius: 8,
+                  height: 80
+                }}
+              />
+            ))}
+          </div>
+        </VirtualPaper>
+      </main>
+    </div>
   )
 }
