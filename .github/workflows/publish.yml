@@ -1,0 +1,69 @@
+# Publish Workflow - Tag 发布到 NPM
+# 当推送 v*.*.* 格式的 tag 时触发
+# - v1.0.0 发布正式版
+# - v1.0.0-beta.1 发布 beta 版
+name: Publish to NPM
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  publish:
+    name: Publish to NPM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build library
+        run: yarn build:lib
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # 去掉 v 前缀
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # 判断是否为 beta 版本
+          if [[ "$VERSION" == *"-beta."* ]]; then
+            echo "tag=beta" >> $GITHUB_OUTPUT
+            echo "publish_tag=--tag beta" >> $GITHUB_OUTPUT
+          else
+            echo "tag=latest" >> $GITHUB_OUTPUT
+            echo "publish_tag=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update package version
+        run: |
+          # 更新 package.json 中的版本号
+          npm version ${{ steps.version.outputs.version }} --no-git-tag-version
+
+      - name: Publish to NPM
+        run: npm publish --access public ${{ steps.version.outputs.publish_tag }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,7 +1,11 @@
 {
   "name": "virtual-paper",
-  "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0-beta.1",
+  "private": false,
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "type": "module",
   "main": "./dist/virtual-paper.umd.js",
   "module": "./dist/virtual-paper.es.js",
