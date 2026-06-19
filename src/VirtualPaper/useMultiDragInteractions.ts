@@ -7,7 +7,11 @@ import {
   type Options,
   type Pose
 } from '@system-ui-js/multi-drag'
-import { clampScale } from './transform'
+import {
+  clampReaderTransform,
+  clampScale,
+  validateReaderModeZoomDebounceMs
+} from './transform'
 import {
   type UseVirtualPaperInteractionArgs,
   type VirtualPaperInteractionMode as VirtualPaperInteractionModeType,
@@ -29,6 +33,13 @@ type ActivePointerGesture = {
 }
 
 const SCALE_EPSILON = 0.000001
+
+const READER_MODE_PAN_SOURCES = [
+  VirtualPaperInteractionMode.MouseDragPan,
+  VirtualPaperInteractionMode.TouchSingleFingerPan,
+  VirtualPaperInteractionMode.TouchTwoFingerPan,
+  VirtualPaperInteractionMode.PenPan
+]
 
 const getPointerModeFlags = (
   enabledInteractions: VirtualPaperInteractionModeType[]
@@ -177,15 +188,22 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
     enabledInteractions,
     minScale,
     maxScale,
+    contentSize,
     updateTransform,
-    endTransform
+    endTransform,
+    isReaderMode,
+    readerModeZoomDebounceMs
   } = args
 
   const transformRef = useRef(transform)
   const minScaleRef = useRef(minScale)
   const maxScaleRef = useRef(maxScale)
+  const contentSizeRef = useRef(contentSize)
   const updateTransformRef = useRef(updateTransform)
   const endTransformRef = useRef(endTransform)
+  const isReaderModeRef = useRef(isReaderMode)
+  const readerModeZoomDebounceMsRef = useRef(readerModeZoomDebounceMs)
+  const readerZoomEndTimerRef = useRef<number | null>(null)
   const activeGestureRef = useRef<ActivePointerGesture | null>(null)
   const zoomSegmentRef = useRef<{
     startTransform: VirtualPaperTransform
@@ -205,8 +223,11 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
   transformRef.current = transform
   minScaleRef.current = minScale
   maxScaleRef.current = maxScale
+  contentSizeRef.current = contentSize
   updateTransformRef.current = updateTransform
   endTransformRef.current = endTransform
+  isReaderModeRef.current = isReaderMode
+  readerModeZoomDebounceMsRef.current = readerModeZoomDebounceMs
 
   const flags = getPointerModeFlags(enabledInteractions)
 
@@ -215,6 +236,33 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
     if (!element || !hasPointerModes(flags)) return
 
     let mixin: Mixin | null = null
+
+    const scheduleReaderZoomEnd = (
+      transform: VirtualPaperTransform,
+      meta: {
+        source: VirtualPaperInteractionModeType
+        inputType: 'pointer'
+        phase: 'end'
+      }
+    ) => {
+      if (readerZoomEndTimerRef.current !== null) {
+        window.clearTimeout(readerZoomEndTimerRef.current)
+        readerZoomEndTimerRef.current = null
+      }
+
+      const debounceMs = validateReaderModeZoomDebounceMs(
+        readerModeZoomDebounceMsRef.current
+      )
+      if (debounceMs === 0) {
+        endTransformRef.current(transform, meta)
+        return
+      }
+
+      readerZoomEndTimerRef.current = window.setTimeout(() => {
+        endTransformRef.current(transform, meta)
+        readerZoomEndTimerRef.current = null
+      }, debounceMs)
+    }
 
     const getPose = (target: HTMLElement): Pose => {
       const rect = target.getBoundingClientRect()
@@ -248,6 +296,10 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
       )
 
       if (!source) return
+
+      if (isReaderModeRef.current && READER_MODE_PAN_SOURCES.includes(source)) {
+        return
+      }
 
       // 预防式屏蔽：multi→single 转换后，剩下那根手指的所有后续 pan 更新都直接丢弃。
       // 这覆盖了 didScaleDuringGestureRef freeze 漏掉的 phase==='change' 场景
@@ -296,6 +348,16 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
           scale: nextScale
         }
       }
+
+      if (isReaderModeRef.current && contentSizeRef.current && wrapperRef.current) {
+        nextTransform = clampReaderTransform(
+          nextTransform,
+          contentSizeRef.current,
+          wrapperRef.current.clientWidth,
+          wrapperRef.current.clientHeight
+        )
+      }
+
       const meta = {
         source,
         inputType: 'pointer' as const,
@@ -303,6 +365,14 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
       }
 
       if (phase === 'end') {
+        if (
+          isReaderModeRef.current &&
+          source === VirtualPaperInteractionMode.TouchTwoFingerZoom
+        ) {
+          scheduleReaderZoomEnd(nextTransform, { ...meta, phase: 'end' })
+          return
+        }
+
         endTransformRef.current(nextTransform, meta)
         return
       }
@@ -386,6 +456,10 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
       zoomSegmentRef.current = null
       didScaleDuringGestureRef.current = false
       singlePanBlockedAfterMultiRef.current = false
+      if (readerZoomEndTimerRef.current !== null) {
+        window.clearTimeout(readerZoomEndTimerRef.current)
+        readerZoomEndTimerRef.current = null
+      }
       mixin?.destroy()
     }
   }, [

@@ -3,7 +3,6 @@ import {
   VirtualPaper,
   VirtualPaperInteractionMode,
   VirtualPaperInitialPlacement,
-  VirtualPaperRenderMode,
   DEFAULT_ENABLED_INTERACTIONS
 } from './index'
 import type { VirtualPaperTransform } from './index'
@@ -19,8 +18,6 @@ export default function App() {
     VirtualPaperInitialPlacement.Center
   )
 
-  const [renderMode, setRenderMode] = useState(VirtualPaperRenderMode.Transform)
-
   const [isControlled, setIsControlled] = useState(false)
 
   const [controlledTransform, setControlledTransform] =
@@ -30,6 +27,8 @@ export default function App() {
     useState<VirtualPaperTransform>({ x: 0, y: 0, scale: 1 })
 
   const [remountKey, setRemountKey] = useState(0)
+
+  const [readerMode, setReaderMode] = useState(false)
 
   const [controlledX, setControlledX] = useState('0')
   const [controlledY, setControlledY] = useState('0')
@@ -85,28 +84,6 @@ export default function App() {
         <h2>VirtualPaper 控制器</h2>
 
         <section className="control-section">
-          <h3>渲染模式</h3>
-          <label className="mode-toggle">
-            <input
-              type="radio"
-              data-testid="render-mode-Transform"
-              checked={renderMode === VirtualPaperRenderMode.Transform}
-              onChange={() => setRenderMode(VirtualPaperRenderMode.Transform)}
-            />
-            <span>Transform (translate + scale)</span>
-          </label>
-          <label className="mode-toggle">
-            <input
-              type="radio"
-              data-testid="render-mode-Scroll"
-              checked={renderMode === VirtualPaperRenderMode.Scroll}
-              onChange={() => setRenderMode(VirtualPaperRenderMode.Scroll)}
-            />
-            <span>Scroll (宽高 + scrollLeft)</span>
-          </label>
-        </section>
-
-        <section className="control-section">
           <h3>交互模式</h3>
           {ALL_MODES.map((mode) => (
             <label key={mode} className="mode-toggle">
@@ -139,6 +116,22 @@ export default function App() {
               TopLeft
             </option>
           </select>
+        </section>
+
+        <section className="control-section">
+          <h3>阅读模式</h3>
+          <label className="mode-toggle">
+            <input
+              type="checkbox"
+              data-testid="reader-mode-toggle"
+              checked={readerMode}
+              onChange={(e) => {
+                setReaderMode(e.target.checked)
+                setRemountKey((k) => k + 1)
+              }}
+            />
+            <span>启用阅读模式</span>
+          </label>
         </section>
 
         <section className="control-section">
@@ -209,18 +202,28 @@ export default function App() {
         </section>
       </aside>
 
-      <main className="paper-stage">
+      <main
+        className="paper-stage"
+        style={
+          readerMode
+            ? { height: '100vh', width: '100%', overflow: 'auto' }
+            : undefined
+        }
+      >
         <VirtualPaper
           key={remountKey}
           enabledInteractions={enabledInteractions}
           initialPlacement={initialPlacement}
-          renderMode={renderMode}
-          contentSize={{ width: 600, height: 400 }}
-          // transform 模式下 container 需显式尺寸（子元素用 100% 撑满）；
-          // scroll 模式下此值被 scaledWidth/Height 覆盖
           containerStyle={{ width: 600, height: 400 }}
           {...(isControlled ? { transform: controlledTransform } : {})}
           onTransformChange={handleTransformChange}
+          {...(readerMode
+            ? {
+                readerMode: true,
+                contentSize: { width: 600, height: 400 },
+                readerModeZoomDebounceMs: 500
+              }
+            : {})}
         >
           <div
             style={{

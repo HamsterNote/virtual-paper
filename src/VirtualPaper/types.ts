@@ -16,25 +16,13 @@ export enum VirtualPaperInitialPlacement {
   Center = 'Center'
 }
 
-/**
- * 渲染模式（独立于交互模式 InteractionMode 的维度）。
- *
- * - Transform：默认。用 CSS `transform: translate3d + scale` 驱动平移与缩放。
- * - Scroll：用改变 container 宽高来表示 scale、改变 wrapper.scrollLeft/Top
- *   来表示 translate。适合需要原生 scroll 几何（如与其他滚动容器联动）的场景。
- */
-export enum VirtualPaperRenderMode {
-  Transform = 'Transform',
-  Scroll = 'Scroll'
-}
-
 export type VirtualPaperTransform = { x: number; y: number; scale: number }
 
 /**
- * scroll 模式下内容的未缩放基础尺寸。
+ * reader 模式下内容的未缩放基础尺寸。
  *
- * scroll 模式必须知道内容的原始尺寸才能计算 container 的宽高（= 基础 × scale）。
- * 必须由调用方显式提供：未提供时 baseSize 退化为 0×0，container 宽高为 'auto'，
+ * reader 模式必须知道内容的原始尺寸才能计算 container 的宽高（= 基础 × scale）。
+ * 必须由调用方显式提供：未提供时退化为 wrapper 尺寸，
  * 缩放与原生滚动几何将不会按预期工作。
  */
 export type VirtualPaperContentSize = { width: number; height: number }
@@ -55,17 +43,19 @@ export type VirtualPaperProps = {
   enabledInteractions?: VirtualPaperInteractionMode[]
   initialPlacement?: VirtualPaperInitialPlacement
   /**
-   * 渲染模式。默认 Transform（CSS transform）。
-   * Scroll 模式用 container 宽高 + wrapper scroll 几何实现相同的 pan/zoom 语义。
-   * 两种模式下 {x,y,scale} 状态语义完全一致，运行时切换会平滑保留状态。
-   */
-  renderMode?: VirtualPaperRenderMode
-  /**
-   * scroll 模式下内容的未缩放基础尺寸。
-   * 必须显式提供：未提供时 container 宽高为 'auto'，缩放将无法工作。
-   * 仅在 renderMode === Scroll 时生效。
+   * reader 模式下内容的未缩放基础尺寸。
    */
   contentSize?: VirtualPaperContentSize
+  /**
+   * 阅读模式。默认 false。
+   * 开启后使用原生滚动几何，适合文档阅读、PDF 阅读等场景。
+   */
+  readerMode?: boolean
+  /**
+   * 阅读模式下的缩放防抖时间（毫秒）。
+   * 默认 500ms。仅在 readerMode 为 true 时生效。
+   */
+  readerModeZoomDebounceMs?: number
   transform?: VirtualPaperTransform
   defaultTransform?: Partial<VirtualPaperTransform>
   minScale?: number
@@ -98,14 +88,18 @@ export type UseVirtualPaperInteractionArgs = {
   enabledInteractions: VirtualPaperInteractionMode[]
   minScale: number
   maxScale: number
+  contentSize?: VirtualPaperContentSize
   updateTransform: VirtualPaperTransformUpdater
   endTransform: VirtualPaperTransformUpdater
   /**
-   * scroll 渲染模式下为 true。
-   * wheel hook 在 scroll 模式下：非 ctrl/meta 的 wheel 交给原生滚动（不 preventDefault），
-   * 仅 ctrl/meta + wheel 触发 JS zoom。
+   * 阅读模式下为 true。
    */
-  isScrollMode?: boolean
+  isReaderMode?: boolean
+  /**
+   * 阅读模式下的缩放防抖时间（毫秒）。
+   * 默认 500ms。仅在 isReaderMode 为 true 时生效。
+   */
+  readerModeZoomDebounceMs?: number
 }
 
 export const DEFAULT_ENABLED_INTERACTIONS = [

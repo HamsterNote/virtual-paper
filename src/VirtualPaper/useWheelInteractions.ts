@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef } from 'react'
 
-import { applyZoomAnchor, clampScale } from './transform'
+import {
+  applyZoomAnchor,
+  clampReaderTransform,
+  clampScale,
+  validateReaderModeZoomDebounceMs
+} from './transform'
 import {
   type UseVirtualPaperInteractionArgs,
   type VirtualPaperTransform,
@@ -64,17 +69,23 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
   }, [])
 
   const scheduleWheelEnd = useCallback(
-    (transform: VirtualPaperTransform, source: VirtualPaperInteractionMode) => {
+    (
+      transform: VirtualPaperTransform,
+      source: VirtualPaperInteractionMode,
+      debounceMs: number
+    ) => {
       wheelEndStateRef.current = { transform, source }
 
       if (wheelEndTimerRef.current !== null) {
         window.clearTimeout(wheelEndTimerRef.current)
       }
 
-      wheelEndTimerRef.current = window.setTimeout(
-        finishWheelTransform,
-        WHEEL_END_DEBOUNCE_MS
-      )
+      if (debounceMs === 0) {
+        finishWheelTransform()
+        return
+      }
+
+      wheelEndTimerRef.current = window.setTimeout(finishWheelTransform, debounceMs)
     },
     [finishWheelTransform]
   )
@@ -83,22 +94,21 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
     (event: WheelEvent) => {
       const {
         wrapperRef,
+        contentSize,
         transform,
         enabledInteractions,
         minScale,
         maxScale,
         updateTransform,
-        isScrollMode
+        isReaderMode,
+        readerModeZoomDebounceMs
       } = latestArgsRef.current
       const wrapper = wrapperRef.current
       const hasInteraction = (mode: VirtualPaperInteractionMode) => {
         return enabledInteractions.includes(mode)
       }
 
-      // scroll 模式：非 ctrl/meta 的 wheel 交给原生滚动（overflow:auto 处理），
-      // 不 preventDefault、不更新 transform；原生 scroll 事件会反向同步 transform。
-      // 仅 ctrl/meta + wheel 触发 JS zoom（保持焦点锚点）。
-      if (isScrollMode && !event.ctrlKey && !event.metaKey) {
+      if (isReaderMode && !event.ctrlKey && !event.metaKey) {
         return
       }
 
@@ -138,9 +148,24 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
         return
       }
 
+      if (isReaderMode && contentSize && wrapper) {
+        nextTransform = clampReaderTransform(
+          nextTransform,
+          contentSize,
+          wrapper.clientWidth,
+          wrapper.clientHeight
+        )
+      }
+
       event.preventDefault()
       updateTransform(nextTransform, createWheelMeta(source, 'change'))
-      scheduleWheelEnd(nextTransform, source)
+      scheduleWheelEnd(
+        nextTransform,
+        source,
+        isReaderMode
+          ? validateReaderModeZoomDebounceMs(readerModeZoomDebounceMs)
+          : WHEEL_END_DEBOUNCE_MS
+      )
     },
     [scheduleWheelEnd]
   )

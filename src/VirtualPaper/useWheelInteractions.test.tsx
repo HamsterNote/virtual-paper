@@ -15,7 +15,8 @@ type WheelHarnessProps = {
   initialTransform?: VirtualPaperTransform
   minScale?: number
   maxScale?: number
-  isScrollMode?: boolean
+  isReaderMode?: boolean
+  readerModeZoomDebounceMs?: number
   onUpdate?: VirtualPaperTransformUpdater
   onEnd?: VirtualPaperTransformUpdater
 }
@@ -27,7 +28,8 @@ function WheelHarness({
   initialTransform = defaultTransform,
   minScale = 0.25,
   maxScale = 4,
-  isScrollMode = false,
+  isReaderMode = false,
+  readerModeZoomDebounceMs,
   onUpdate = () => undefined,
   onEnd = () => undefined
 }: WheelHarnessProps) {
@@ -47,7 +49,8 @@ function WheelHarness({
       setTransform(next)
     },
     endTransform: onEnd,
-    isScrollMode
+    isReaderMode,
+    readerModeZoomDebounceMs
   })
 
   return (
@@ -312,17 +315,15 @@ describe('useWheelInteractions', () => {
     )
   })
 
-  // --- scroll 模式 wheel 行为 ---
-  // scroll 模式下非 ctrl wheel 交给原生滚动，不 preventDefault、不更新 transform；
-  // 仅 ctrl+wheel 触发 JS zoom。
+  // --- readerMode wheel 行为 ---
 
-  it('scroll mode: non-ctrl wheel does not preventDefault or update transform (native scroll)', () => {
+  it('readerMode: non-ctrl wheel does not preventDefault or update transform (native scroll)', () => {
     const onUpdate = vi.fn()
 
     render(
       <WheelHarness
         enabledInteractions={[VirtualPaperInteractionMode.TrackpadScrollPan]}
-        isScrollMode
+        isReaderMode
         onUpdate={onUpdate}
       />
     )
@@ -337,14 +338,14 @@ describe('useWheelInteractions', () => {
     expect(preventDefault).not.toHaveBeenCalled()
   })
 
-  it('scroll mode: ctrl+wheel still zooms with preventDefault', () => {
+  it('readerMode: ctrl+wheel still zooms with preventDefault', () => {
     const onUpdate = vi.fn()
 
     render(
       <WheelHarness
         enabledInteractions={[VirtualPaperInteractionMode.MouseWheelCtrlZoom]}
         initialTransform={{ x: 0, y: 0, scale: 1 }}
-        isScrollMode
+        isReaderMode
         onUpdate={onUpdate}
       />
     )
@@ -360,13 +361,13 @@ describe('useWheelInteractions', () => {
     expect(next.scale).toBeGreaterThan(1)
   })
 
-  it('scroll mode: MouseWheelZoom (plain wheel) does not zoom (native scroll takes over)', () => {
+  it('readerMode: MouseWheelZoom (plain wheel) does not zoom (native scroll takes over)', () => {
     const onUpdate = vi.fn()
 
     render(
       <WheelHarness
         enabledInteractions={[VirtualPaperInteractionMode.MouseWheelZoom]}
-        isScrollMode
+        isReaderMode
         onUpdate={onUpdate}
       />
     )
@@ -377,5 +378,133 @@ describe('useWheelInteractions', () => {
     })
 
     expect(onUpdate).not.toHaveBeenCalled()
+  })
+
+  it('readerMode: wheel end debounce defaults to 500ms when readerModeZoomDebounceMs is not set', () => {
+    vi.useFakeTimers()
+    const onEnd = vi.fn()
+
+    render(
+      <WheelHarness
+        enabledInteractions={[VirtualPaperInteractionMode.MouseWheelCtrlZoom]}
+        initialTransform={{ x: 0, y: 0, scale: 1 }}
+        isReaderMode
+        onEnd={onEnd}
+      />
+    )
+
+    dispatchWheel(screen.getByTestId('wheel-wrapper'), {
+      deltaY: -100,
+      ctrlKey: true
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(499)
+    })
+    expect(onEnd).not.toHaveBeenCalled()
+
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+    expect(onEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it('readerMode: wheel end debounce respects custom readerModeZoomDebounceMs=300', () => {
+    vi.useFakeTimers()
+    const onEnd = vi.fn()
+
+    render(
+      <WheelHarness
+        enabledInteractions={[VirtualPaperInteractionMode.MouseWheelCtrlZoom]}
+        initialTransform={{ x: 0, y: 0, scale: 1 }}
+        isReaderMode
+        readerModeZoomDebounceMs={300}
+        onEnd={onEnd}
+      />
+    )
+
+    dispatchWheel(screen.getByTestId('wheel-wrapper'), {
+      deltaY: -100,
+      ctrlKey: true
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(299)
+    })
+    expect(onEnd).not.toHaveBeenCalled()
+
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+    expect(onEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it('readerMode: readerModeZoomDebounceMs=0 triggers endTransform immediately on next tick', () => {
+    vi.useFakeTimers()
+    const onEnd = vi.fn()
+
+    render(
+      <WheelHarness
+        enabledInteractions={[VirtualPaperInteractionMode.MouseWheelCtrlZoom]}
+        initialTransform={{ x: 0, y: 0, scale: 1 }}
+        isReaderMode
+        readerModeZoomDebounceMs={0}
+        onEnd={onEnd}
+      />
+    )
+
+    dispatchWheel(screen.getByTestId('wheel-wrapper'), {
+      deltaY: -100,
+      ctrlKey: true
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(0)
+    })
+    expect(onEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it('readerMode: ctrl+wheel zoom is clamped to maxScale', () => {
+    const onUpdate = vi.fn()
+
+    render(
+      <WheelHarness
+        enabledInteractions={[VirtualPaperInteractionMode.MouseWheelCtrlZoom]}
+        initialTransform={{ x: 0, y: 0, scale: 3.9 }}
+        maxScale={4}
+        isReaderMode
+        onUpdate={onUpdate}
+      />
+    )
+
+    dispatchWheel(screen.getByTestId('wheel-wrapper'), {
+      deltaY: -1000,
+      ctrlKey: true
+    })
+
+    const next = onUpdate.mock.calls[0][0] as VirtualPaperTransform
+    expect(next.scale).toBe(4)
+  })
+
+  it('readerMode: ctrl+wheel zoom is clamped to minScale', () => {
+    const onUpdate = vi.fn()
+
+    render(
+      <WheelHarness
+        enabledInteractions={[VirtualPaperInteractionMode.MouseWheelCtrlZoom]}
+        initialTransform={{ x: 0, y: 0, scale: 0.26 }}
+        minScale={0.25}
+        isReaderMode
+        onUpdate={onUpdate}
+      />
+    )
+
+    dispatchWheel(screen.getByTestId('wheel-wrapper'), {
+      deltaY: 1000,
+      ctrlKey: true
+    })
+
+    const next = onUpdate.mock.calls[0][0] as VirtualPaperTransform
+    expect(next.scale).toBe(0.25)
   })
 })

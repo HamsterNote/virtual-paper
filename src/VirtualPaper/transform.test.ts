@@ -3,9 +3,13 @@ import { describe, expect, it } from 'vitest'
 import {
   applyZoomAnchor,
   clampScale,
+  clampReaderTransform,
+  convertTransformToLayout,
+  convertLayoutToTransform,
   getInitialTransform,
   mergeDefaultTransform,
-  serializeTransform
+  serializeTransform,
+  validateReaderModeZoomDebounceMs
 } from './transform'
 import { VirtualPaperInitialPlacement } from './types'
 
@@ -101,5 +105,169 @@ describe('mergeDefaultTransform', () => {
     expect(
       mergeDefaultTransform({ x: 0, y: 0, scale: 0.1 }, undefined, 0.25, 4)
     ).toEqual({ x: 0, y: 0, scale: 0.25 })
+  })
+})
+
+// 公共 fixture: contentSize 1000x2000, wrapper 500x500
+const readerContentSize = { width: 1000, height: 2000 }
+const readerWrapperWidth = 500
+const readerWrapperHeight = 500
+
+describe('clampReaderTransform', () => {
+  // scale=0.25 → 输出 250x500 (fits wrapper), x/y clamp to 0
+  it('clamps x/y to 0 when content (1000x2000 @ scale=0.25 = 250x500) fits wrapper (500x500)', () => {
+    const transform = { x: -50, y: -100, scale: 0.25 }
+    const result = clampReaderTransform(
+      transform,
+      readerContentSize,
+      readerWrapperWidth,
+      readerWrapperHeight
+    )
+    expect(result).toEqual({ x: 0, y: 0, scale: 0.25 })
+  })
+
+  // scale=0.5 → 输出 500x1000; x: 500==wrapper → clamp 0; y: 1000-500=500 scrollable
+  it('clamps x=0, y∈[-500,0] when content (1000x2000 @ scale=0.5 = 500x1000) partially overflows wrapper (500x500)', () => {
+    const transform = { x: -10, y: -600, scale: 0.5 }
+    const result = clampReaderTransform(
+      transform,
+      readerContentSize,
+      readerWrapperWidth,
+      readerWrapperHeight
+    )
+    expect(result.x).toBe(0)
+    expect(result.y).toBe(-500)
+    expect(result.scale).toBe(0.5)
+  })
+
+  it('allows y within legal bounds at scale=0.5 (content 500x1000, wrapper 500x500)', () => {
+    const transform = { x: 0, y: -250, scale: 0.5 }
+    const result = clampReaderTransform(
+      transform,
+      readerContentSize,
+      readerWrapperWidth,
+      readerWrapperHeight
+    )
+    expect(result).toEqual({ x: 0, y: -250, scale: 0.5 })
+  })
+
+  // scale=2 → 输出 2000x4000; x clamp [-1500,0] (2000-500); y clamp [-3500,0] (4000-500)
+  it('clamps x∈[-1500,0], y∈[-3500,0] when content (1000x2000 @ scale=2 = 2000x4000) heavily overflows wrapper (500x500)', () => {
+    const transform = { x: -2000, y: -4000, scale: 2 }
+    const result = clampReaderTransform(
+      transform,
+      readerContentSize,
+      readerWrapperWidth,
+      readerWrapperHeight
+    )
+    expect(result.x).toBe(-1500)
+    expect(result.y).toBe(-3500)
+    expect(result.scale).toBe(2)
+  })
+
+  it('clamps positive x/y to 0 at scale=2 (cannot scroll past origin)', () => {
+    const transform = { x: 100, y: 200, scale: 2 }
+    const result = clampReaderTransform(
+      transform,
+      readerContentSize,
+      readerWrapperWidth,
+      readerWrapperHeight
+    )
+    expect(result.x).toBe(0)
+    expect(result.y).toBe(0)
+    expect(result.scale).toBe(2)
+  })
+})
+
+describe('convertTransformToLayout', () => {
+  it('returns bounded layout size 250x500 with scroll=0 for scale=0.25 (content fits wrapper)', () => {
+    const transform = { x: 0, y: 0, scale: 0.25 }
+    const result = convertTransformToLayout(
+      transform,
+      readerContentSize,
+      readerWrapperWidth,
+      readerWrapperHeight
+    )
+    expect(result.width).toBe(250)
+    expect(result.height).toBe(500)
+    expect(result.scrollLeft).toBe(0)
+    expect(result.scrollTop).toBe(0)
+    expect(result.boundedTransform).toEqual({ x: 0, y: 0, scale: 0.25 })
+  })
+
+  it('returns bounded layout size 500x1000 with clamped scroll for scale=0.5', () => {
+    const transform = { x: -200, y: -300, scale: 0.5 }
+    const result = convertTransformToLayout(
+      transform,
+      readerContentSize,
+      readerWrapperWidth,
+      readerWrapperHeight
+    )
+    expect(result.width).toBe(500)
+    expect(result.height).toBe(1000)
+    expect(result.scrollLeft).toBe(0)
+    expect(result.scrollTop).toBe(300)
+    expect(result.boundedTransform.x).toBe(0)
+    expect(result.boundedTransform.y).toBe(-300)
+  })
+
+  it('returns bounded layout size 2000x4000 with clamped scroll for scale=2', () => {
+    const transform = { x: -500, y: -1000, scale: 2 }
+    const result = convertTransformToLayout(
+      transform,
+      readerContentSize,
+      readerWrapperWidth,
+      readerWrapperHeight
+    )
+    expect(result.width).toBe(2000)
+    expect(result.height).toBe(4000)
+    expect(result.scrollLeft).toBe(500)
+    expect(result.scrollTop).toBe(1000)
+    expect(result.boundedTransform).toEqual({ x: -500, y: -1000, scale: 2 })
+  })
+})
+
+describe('convertLayoutToTransform', () => {
+  it('converts layout scroll position back to negative transform coordinates', () => {
+    const result = convertLayoutToTransform(2000, 4000, 500, 1000, 2)
+    expect(result).toEqual({ x: -500, y: -1000, scale: 2 })
+  })
+
+  it('converts zero scroll to zero transform offset', () => {
+    const result = convertLayoutToTransform(250, 500, 0, 0, 0.25)
+    expect(result).toEqual({ x: 0, y: 0, scale: 0.25 })
+  })
+
+  it('ignores width/height and maps scrollLeft/scrollTop to -x/-y', () => {
+    const result = convertLayoutToTransform(500, 1000, 0, 250, 0.5)
+    expect(result.x).toBe(0)
+    expect(result.y).toBe(-250)
+    expect(result.scale).toBe(0.5)
+  })
+})
+
+describe('validateReaderModeZoomDebounceMs', () => {
+  it('returns 500 (default) when value is undefined', () => {
+    expect(validateReaderModeZoomDebounceMs(undefined)).toBe(500)
+  })
+
+  it('returns 0 when value is explicitly 0 (zero debounce = immediate)', () => {
+    expect(validateReaderModeZoomDebounceMs(0)).toBe(0)
+  })
+
+  it('returns 500 (default) when value is -1 (negative is invalid)', () => {
+    expect(validateReaderModeZoomDebounceMs(-1)).toBe(500)
+  })
+
+  it('returns 500 (default) when value is Infinity', () => {
+    expect(validateReaderModeZoomDebounceMs(Infinity)).toBe(500)
+  })
+
+  it('returns 500 (default) when value is NaN', () => {
+    expect(validateReaderModeZoomDebounceMs(NaN)).toBe(500)
+  })
+
+  it('returns the value itself when it is a valid positive number', () => {
+    expect(validateReaderModeZoomDebounceMs(300)).toBe(300)
   })
 })
