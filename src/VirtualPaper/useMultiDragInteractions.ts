@@ -241,6 +241,13 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
 
     let mixin: Mixin | null = null
 
+    const cancelReaderZoomEnd = () => {
+      if (readerZoomEndTimerRef.current !== null) {
+        window.clearTimeout(readerZoomEndTimerRef.current)
+        readerZoomEndTimerRef.current = null
+      }
+    }
+
     const scheduleReaderZoomEnd = (
       transform: VirtualPaperTransform,
       meta: {
@@ -249,10 +256,7 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
         phase: 'end'
       }
     ) => {
-      if (readerZoomEndTimerRef.current !== null) {
-        window.clearTimeout(readerZoomEndTimerRef.current)
-        readerZoomEndTimerRef.current = null
-      }
+      cancelReaderZoomEnd()
 
       const debounceMs = validateReaderModeZoomDebounceMs(
         readerModeZoomDebounceMsRef.current
@@ -443,6 +447,7 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
       zoomSegmentRef.current = null
       didScaleDuringGestureRef.current = false
       singlePanBlockedAfterMultiRef.current = false
+      cancelReaderZoomEnd()
     }
 
     mixin = new Mixin(
@@ -469,10 +474,7 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
       zoomSegmentRef.current = null
       didScaleDuringGestureRef.current = false
       singlePanBlockedAfterMultiRef.current = false
-      if (readerZoomEndTimerRef.current !== null) {
-        window.clearTimeout(readerZoomEndTimerRef.current)
-        readerZoomEndTimerRef.current = null
-      }
+      cancelReaderZoomEnd()
       mixin?.destroy()
     }
   }, [

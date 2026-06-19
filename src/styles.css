@@ -143,8 +143,9 @@ button {
   flex: 1 1 auto;
   position: relative;
   min-width: 0;
+  height: 100vh;
   max-height: 100vh;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 /* ---- Transform readout ---- */

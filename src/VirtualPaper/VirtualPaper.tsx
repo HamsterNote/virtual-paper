@@ -47,9 +47,12 @@ export const VirtualPaper = ({
   const wrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const warnedMissingContentSizeRef = useRef(false)
+  const programmaticReaderScrollRef = useRef<{ left: number; top: number } | null>(null)
   const isControlled = controlledTransform !== undefined
   const isReaderMode = readerMode === true
   const isContainMode = containMode === true && !isReaderMode
+  const contentWidth = contentSize?.width
+  const contentHeight = contentSize?.height
 
   const [uncontrolledTransform, setUncontrolledTransform] = useState<VirtualPaperTransform>(() => {
     const base = { x: 0, y: 0, scale: 1 }
@@ -157,7 +160,9 @@ export const VirtualPaper = ({
   const getReaderContentSize = useCallback(() => {
     const wrapper = wrapperRef.current
 
-    if (contentSize) return contentSize
+    if (contentWidth !== undefined && contentHeight !== undefined) {
+      return { width: contentWidth, height: contentHeight }
+    }
 
     if (isReaderMode && !warnedMissingContentSizeRef.current) {
       warnedMissingContentSizeRef.current = true
@@ -167,7 +172,7 @@ export const VirtualPaper = ({
       width: wrapper?.clientWidth ?? 0,
       height: wrapper?.clientHeight ?? 0
     }
-  }, [contentSize, isReaderMode])
+  }, [contentHeight, contentWidth, isReaderMode])
 
   useLayoutEffect(() => {
     if (!isReaderMode) return
@@ -184,6 +189,13 @@ export const VirtualPaper = ({
     )
     const targetLeft = Math.max(0, Math.round(readerLayout.scrollLeft))
     const targetTop = Math.max(0, Math.round(readerLayout.scrollTop))
+    const shouldUpdateScroll =
+      wrapper.scrollLeft !== targetLeft || wrapper.scrollTop !== targetTop
+
+    if (shouldUpdateScroll) {
+      // 标记本次滚动来自 transform -> native scroll 的同步，避免 scroll 事件再回写 transform。
+      programmaticReaderScrollRef.current = { left: targetLeft, top: targetTop }
+    }
     if (wrapper.scrollLeft !== targetLeft) {
       wrapper.scrollLeft = targetLeft
     }
@@ -206,6 +218,15 @@ export const VirtualPaper = ({
     if (!wrapper) return
 
     const handleScroll = () => {
+      const programmaticScroll = programmaticReaderScrollRef.current
+      if (programmaticScroll) {
+        programmaticReaderScrollRef.current = null
+        if (
+          Math.abs(wrapper.scrollLeft - programmaticScroll.left) <= 1 &&
+          Math.abs(wrapper.scrollTop - programmaticScroll.top) <= 1
+        ) return
+      }
+
       const currentTransform = transformRef.current
       const readerContentSize = getReaderContentSize()
       const layoutTransform = convertLayoutToTransform(

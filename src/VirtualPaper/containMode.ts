@@ -1,10 +1,18 @@
 import { type VirtualPaperTransform } from './types'
 import { projectContainTransform } from './transform'
 
+const MIN_SAFE_RECT_SCALE = 0.01
+
+const getMeasuredSize = (layoutSize: number, rectSize: number, scale: number): number => {
+  if (layoutSize > 0) return layoutSize
+  if (rectSize <= 0 || !Number.isFinite(scale) || scale < MIN_SAFE_RECT_SCALE) return 0
+  return rectSize / scale
+}
+
 /**
  * 测量 wrapper 和 container 的尺寸，返回有效的测量结果或 null。
  * container 使用 offsetWidth/offsetHeight（布局尺寸），fallback 到
- * getBoundingClientRect().width / Math.max(scale, 0.000001) 以补偿 transform 缩放。
+ * getBoundingClientRect().width / scale 以补偿 transform 缩放。
  */
 export function measureContainBox(
   wrapper: HTMLElement,
@@ -18,11 +26,10 @@ export function measureContainBox(
 } | null {
   const wrapperWidth = wrapper.clientWidth || wrapper.getBoundingClientRect().width
   const wrapperHeight = wrapper.clientHeight || wrapper.getBoundingClientRect().height
+  const containerRect = container.getBoundingClientRect()
 
-  const containerWidth =
-    container.offsetWidth || container.getBoundingClientRect().width / Math.max(scale, 0.000001)
-  const containerHeight =
-    container.offsetHeight || container.getBoundingClientRect().height / Math.max(scale, 0.000001)
+  const containerWidth = getMeasuredSize(container.offsetWidth, containerRect.width, scale)
+  const containerHeight = getMeasuredSize(container.offsetHeight, containerRect.height, scale)
 
   if (![wrapperWidth, wrapperHeight, containerWidth, containerHeight].every(Number.isFinite))
     return null

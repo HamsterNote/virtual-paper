@@ -122,7 +122,10 @@ function TestHarness({
   maxScale = 4,
   updateTransform = vi.fn(),
   endTransform = vi.fn(),
-  containMode = false
+  containMode = false,
+  contentSize,
+  isReaderMode = false,
+  readerModeZoomDebounceMs
 }: HarnessProps) {
   const wrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -134,9 +137,12 @@ function TestHarness({
     enabledInteractions,
     minScale,
     maxScale,
+    contentSize,
     updateTransform,
     endTransform,
-    containMode
+    containMode,
+    isReaderMode,
+    readerModeZoomDebounceMs
   })
 
   return (
@@ -226,6 +232,7 @@ describe('useMultiDragInteractions', () => {
 
   afterEach(() => {
     cleanup()
+    vi.useRealTimers()
     Element.prototype.getBoundingClientRect = originalGetBoundingClientRect
   })
 
@@ -627,6 +634,39 @@ describe('useMultiDragInteractions', () => {
     ).toHaveBeenCalledTimes(1)
     const panTransform = updateTransform.mock.calls[0][0] as VirtualPaperTransform
     expect(panTransform).toEqual({ x: 70, y: 60, scale: 1 })
+  })
+
+  it('cancels pending reader-mode zoom end when AllEnd clears the gesture', () => {
+    vi.useFakeTimers()
+    const endTransform = vi.fn()
+    render(
+      <TestHarness
+        transform={{ x: 0, y: 0, scale: 1 }}
+        enabledInteractions={[VirtualPaperInteractionMode.TouchTwoFingerZoom]}
+        contentSize={{ width: 1000, height: 1000 }}
+        endTransform={endTransform}
+        isReaderMode
+        readerModeZoomDebounceMs={500}
+      />
+    )
+
+    const wrapper = screen.getByTestId('wrapper')
+    const container = screen.getByTestId('container')
+    Object.defineProperty(wrapper, 'clientWidth', { value: 500, configurable: true })
+    Object.defineProperty(wrapper, 'clientHeight', { value: 500, configurable: true })
+
+    const instance = getLastInstance()
+    const fingerA = makeFingerWithPoint('touch', true, { x: 100, y: 100 })
+    const fingerB = makeFingerWithPoint('touch', false, { x: 300, y: 100 })
+
+    instance.trigger('start', [fingerA, fingerB])
+    instance.options.setPoseOnEnd?.(container, { scale: 2 })
+    expect(endTransform).not.toHaveBeenCalled()
+
+    instance.trigger('allEnd', [])
+    vi.advanceTimersByTime(500)
+
+    expect(endTransform).not.toHaveBeenCalled()
   })
 
   // ─────────────────────────────────────────────────────────────────────

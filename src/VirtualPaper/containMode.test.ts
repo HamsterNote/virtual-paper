@@ -78,6 +78,17 @@ describe('measureContainBox', () => {
     // getBoundingClientRect returns 0 for both, so clientWidth=0 → rect=0 → null
     expect(measureContainBox(wrapper, container, 1)).toBeNull()
   })
+
+  it('returns null instead of amplifying rect fallback when scale is too small', () => {
+    const wrapper = createMockElement({ clientWidth: 800, clientHeight: 600 })
+    const container = createMockElement({
+      offsetWidth: 0,
+      offsetHeight: 0,
+      rect: { width: 100, height: 80 }
+    })
+
+    expect(measureContainBox(wrapper, container, 0.001)).toBeNull()
+  })
 })
 
 describe('projectContainTransformForElements', () => {

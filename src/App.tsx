@@ -220,14 +220,7 @@ export default function App() {
         </section>
       </aside>
 
-      <main
-        className="paper-stage"
-        style={
-          readerMode
-            ? { height: '100vh', width: '100%', overflow: 'auto' }
-            : undefined
-        }
-      >
+      <main className="paper-stage">
         <VirtualPaper
           key={remountKey}
           enabledInteractions={enabledInteractions}

@@ -2,27 +2,6 @@ import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
 const EVIDENCE_DIR = '.omo/evidence'
-const TRANSFORM_RE = /x: ([\d.-]+), y: ([\d.-]+), scale: ([\d.-]+)/
-
-type TransformReadout = {
-  x: number
-  y: number
-  scale: number
-}
-
-async function readTransform(page: Page): Promise<TransformReadout> {
-  const readout = page.locator('[data-testid="transform-readout"]')
-  const text = await readout.innerText()
-  const match = text.match(TRANSFORM_RE)
-
-  expect(match, `Unexpected transform readout: ${text}`).not.toBeNull()
-
-  return {
-    x: Number(match?.[1]),
-    y: Number(match?.[2]),
-    scale: Number(match?.[3])
-  }
-}
 
 async function saveEvidence(page: Page, fileName: string) {
   await page.screenshot({ path: `${EVIDENCE_DIR}/${fileName}`, fullPage: true })
