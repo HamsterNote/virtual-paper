@@ -52,6 +52,10 @@ export type VirtualPaperProps = {
    */
   readerMode?: boolean
   /**
+   * 非阅读模式下启用 contain 约束；默认 false。readerMode 为 true 时忽略。
+   */
+  containMode?: boolean
+  /**
    * 阅读模式下的缩放防抖时间（毫秒）。
    * 默认 500ms。仅在 readerMode 为 true 时生效。
    */
@@ -95,6 +99,10 @@ export type UseVirtualPaperInteractionArgs = {
    * 阅读模式下为 true。
    */
   isReaderMode?: boolean
+  /**
+   * 非阅读模式下启用 contain 约束；默认 false。isReaderMode 为 true 时忽略。
+   */
+  containMode?: boolean
   /**
    * 阅读模式下的缩放防抖时间（毫秒）。
    * 默认 500ms。仅在 isReaderMode 为 true 时生效。

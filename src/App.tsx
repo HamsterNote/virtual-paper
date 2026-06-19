@@ -30,6 +30,8 @@ export default function App() {
 
   const [readerMode, setReaderMode] = useState(false)
 
+  const [containMode, setContainMode] = useState(false)
+
   const [controlledX, setControlledX] = useState('0')
   const [controlledY, setControlledY] = useState('0')
   const [controlledScale, setControlledScale] = useState('1')
@@ -135,6 +137,22 @@ export default function App() {
         </section>
 
         <section className="control-section">
+          <h3>Contain Mode</h3>
+          <label className="mode-toggle">
+            <input
+              type="checkbox"
+              data-testid="contain-mode-toggle"
+              checked={containMode}
+              onChange={(e) => {
+                setContainMode(e.target.checked)
+                setRemountKey((k) => k + 1)
+              }}
+            />
+            <span>启用 contain mode</span>
+          </label>
+        </section>
+
+        <section className="control-section">
           <h3>受控模式</h3>
           <label className="mode-toggle">
             <input
@@ -215,6 +233,7 @@ export default function App() {
           enabledInteractions={enabledInteractions}
           initialPlacement={initialPlacement}
           containerStyle={{ width: 600, height: 400 }}
+          containMode={containMode}
           {...(isControlled ? { transform: controlledTransform } : {})}
           onTransformChange={handleTransformChange}
           {...(readerMode

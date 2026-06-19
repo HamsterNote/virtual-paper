@@ -16,6 +16,7 @@ type WheelHarnessProps = {
   minScale?: number
   maxScale?: number
   isReaderMode?: boolean
+  containMode?: boolean
   readerModeZoomDebounceMs?: number
   onUpdate?: VirtualPaperTransformUpdater
   onEnd?: VirtualPaperTransformUpdater
@@ -29,6 +30,7 @@ function WheelHarness({
   minScale = 0.25,
   maxScale = 4,
   isReaderMode = false,
+  containMode = false,
   readerModeZoomDebounceMs,
   onUpdate = () => undefined,
   onEnd = () => undefined
@@ -50,6 +52,7 @@ function WheelHarness({
     },
     endTransform: onEnd,
     isReaderMode,
+    containMode,
     readerModeZoomDebounceMs
   })
 
@@ -99,6 +102,18 @@ const dispatchWheel = (wrapper: HTMLElement, options: WheelEventInit) => {
   })
 
   return { event, preventDefault }
+}
+
+const mockMeasurements = (
+  wrapper: HTMLElement,
+  container: HTMLElement,
+  wrapperSize: { width: number; height: number },
+  containerSize: { width: number; height: number }
+) => {
+  Object.defineProperty(wrapper, 'clientWidth', { value: wrapperSize.width, configurable: true })
+  Object.defineProperty(wrapper, 'clientHeight', { value: wrapperSize.height, configurable: true })
+  Object.defineProperty(container, 'offsetWidth', { value: containerSize.width, configurable: true })
+  Object.defineProperty(container, 'offsetHeight', { value: containerSize.height, configurable: true })
 }
 
 describe('useWheelInteractions', () => {
@@ -506,5 +521,97 @@ describe('useWheelInteractions', () => {
 
     const next = onUpdate.mock.calls[0][0] as VirtualPaperTransform
     expect(next.scale).toBe(0.25)
+  })
+
+  // --- containMode projection ---
+
+  it('containMode: wheel pan on oversized content clamps at left/top and right/bottom bounds', () => {
+    const onUpdate = vi.fn()
+
+    render(
+      <WheelHarness
+        enabledInteractions={[VirtualPaperInteractionMode.TrackpadScrollPan]}
+        initialTransform={{ x: 0, y: 0, scale: 1 }}
+        containMode
+        onUpdate={onUpdate}
+      />
+    )
+
+    const wrapper = screen.getByTestId('wheel-wrapper')
+    const container = screen.getByTestId('wheel-container')
+    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 1200 })
+
+    dispatchWheel(wrapper, { deltaX: -900, deltaY: -700, ctrlKey: false })
+
+    expect(onUpdate).toHaveBeenCalledWith(
+      { x: 0, y: 0, scale: 1 },
+      expect.objectContaining({ source: VirtualPaperInteractionMode.TrackpadScrollPan })
+    )
+
+    onUpdate.mockClear()
+
+    dispatchWheel(wrapper, { deltaX: 900, deltaY: 700, ctrlKey: false })
+
+    expect(onUpdate).toHaveBeenCalledWith(
+      { x: -800, y: -600, scale: 1 },
+      expect.objectContaining({ source: VirtualPaperInteractionMode.TrackpadScrollPan })
+    )
+  })
+
+  it('containMode: ctrl-wheel zoom on fitted content centers fitted axes', () => {
+    const onUpdate = vi.fn()
+
+    render(
+      <WheelHarness
+        enabledInteractions={[VirtualPaperInteractionMode.MouseWheelCtrlZoom]}
+        initialTransform={{ x: 0, y: 0, scale: 1 }}
+        containMode
+        onUpdate={onUpdate}
+      />
+    )
+
+    const wrapper = screen.getByTestId('wheel-wrapper')
+    const container = screen.getByTestId('wheel-container')
+    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 400, height: 300 })
+
+    dispatchWheel(wrapper, { deltaY: -100, ctrlKey: true })
+
+    const next = onUpdate.mock.calls[0][0] as VirtualPaperTransform
+    const expectedScale = Math.exp(100 * 0.002)
+    const scaledWidth = 400 * expectedScale
+    const scaledHeight = 300 * expectedScale
+
+    expect(next.scale).toBeCloseTo(expectedScale)
+    expect(next.x).toBeCloseTo((800 - scaledWidth) / 2)
+    expect(next.y).toBeCloseTo((600 - scaledHeight) / 2)
+  })
+
+  it('containMode: mixed-axis ctrl-wheel zoom centers fitted axis and clamps oversized axis', () => {
+    const onUpdate = vi.fn()
+
+    render(
+      <WheelHarness
+        enabledInteractions={[VirtualPaperInteractionMode.MouseWheelCtrlZoom]}
+        initialTransform={{ x: 0, y: 0, scale: 1 }}
+        containMode
+        onUpdate={onUpdate}
+      />
+    )
+
+    const wrapper = screen.getByTestId('wheel-wrapper')
+    const container = screen.getByTestId('wheel-container')
+    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 300 })
+
+    dispatchWheel(wrapper, { deltaY: -100, ctrlKey: true })
+
+    const next = onUpdate.mock.calls[0][0] as VirtualPaperTransform
+    const expectedScale = Math.exp(100 * 0.002)
+    const scaledWidth = 1600 * expectedScale
+    const scaledHeight = 300 * expectedScale
+
+    expect(next.scale).toBeCloseTo(expectedScale)
+    expect(next.x).toBeGreaterThanOrEqual(800 - scaledWidth)
+    expect(next.x).toBeLessThanOrEqual(0)
+    expect(next.y).toBeCloseTo((600 - scaledHeight) / 2)
   })
 })

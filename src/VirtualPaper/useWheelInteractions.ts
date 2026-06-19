@@ -6,6 +6,7 @@ import {
   clampScale,
   validateReaderModeZoomDebounceMs
 } from './transform'
+import { projectContainTransformForElements } from './containMode'
 import {
   type UseVirtualPaperInteractionArgs,
   type VirtualPaperTransform,
@@ -94,6 +95,7 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
     (event: WheelEvent) => {
       const {
         wrapperRef,
+        containerRef,
         contentSize,
         transform,
         enabledInteractions,
@@ -101,6 +103,7 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
         maxScale,
         updateTransform,
         isReaderMode,
+        containMode,
         readerModeZoomDebounceMs
       } = latestArgsRef.current
       const wrapper = wrapperRef.current
@@ -155,6 +158,10 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
           wrapper.clientWidth,
           wrapper.clientHeight
         )
+      }
+
+      if (containMode && !isReaderMode && wrapper && containerRef.current) {
+        nextTransform = projectContainTransformForElements(nextTransform, wrapper, containerRef.current)
       }
 
       event.preventDefault()

@@ -8,7 +8,10 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    port: 9826
+    port: 9826,
+    watch: {
+      ignored: ['**/.omo/evidence/**', '**/test-results/**']
+    }
   },
   preview: {
     host: '0.0.0.0',

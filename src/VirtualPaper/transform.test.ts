@@ -8,6 +8,7 @@ import {
   convertLayoutToTransform,
   getInitialTransform,
   mergeDefaultTransform,
+  projectContainTransform,
   serializeTransform,
   validateReaderModeZoomDebounceMs
 } from './transform'
@@ -269,5 +270,103 @@ describe('validateReaderModeZoomDebounceMs', () => {
 
   it('returns the value itself when it is a valid positive number', () => {
     expect(validateReaderModeZoomDebounceMs(300)).toBe(300)
+  })
+})
+
+describe('projectContainTransform', () => {
+  // Case 1: smaller on both axes → centers both axes
+  it('centers container (200x100) inside wrapper (800x600) at scale=1', () => {
+    const result = projectContainTransform(
+      { x: -999, y: 999, scale: 1 },
+      { width: 200, height: 100 },
+      800,
+      600
+    )
+    expect(result).toEqual({ x: 300, y: 250, scale: 1 })
+  })
+
+  // Case 2: equal width/height → returns 0 on equal axis
+  it('returns x=0, y=0 when container equals wrapper (800x600)', () => {
+    const result = projectContainTransform(
+      { x: 100, y: -50, scale: 1 },
+      { width: 800, height: 600 },
+      800,
+      600
+    )
+    expect(result).toEqual({ x: 0, y: 0, scale: 1 })
+  })
+
+  // Case 3: larger on both axes → clamps lower bound and upper bound
+  it('clamps container (1200x900) overflow in wrapper (800x600) at scale=1', () => {
+    const result = projectContainTransform(
+      { x: -999, y: 999, scale: 1 },
+      { width: 1200, height: 900 },
+      800,
+      600
+    )
+    expect(result).toEqual({ x: -400, y: 0, scale: 1 })
+  })
+
+  // Case 4: mixed axis smaller-X / larger-Y → centers X, clamps Y
+  it('centers X (400x900 in 800x600) and clamps Y to 0', () => {
+    const result = projectContainTransform(
+      { x: -999, y: 999, scale: 1 },
+      { width: 400, height: 900 },
+      800,
+      600
+    )
+    expect(result.x).toBe(200)
+    expect(result.y).toBe(0)
+  })
+
+  // Case 5: mixed axis larger-X / smaller-Y → clamps X, centers Y
+  it('clamps X (1200x300 in 800x600) and centers Y', () => {
+    const result = projectContainTransform(
+      { x: -999, y: 999, scale: 1 },
+      { width: 1200, height: 300 },
+      800,
+      600
+    )
+    expect(result.x).toBe(-400)
+    expect(result.y).toBe(150)
+  })
+
+  // Case 6: fractional size/scale uses toBeCloseTo and does not round
+  it('handles fractional container size and scale without rounding', () => {
+    const result = projectContainTransform(
+      { x: -50, y: 25, scale: 0.75 },
+      { width: 333.33, height: 111.11 },
+      800,
+      600
+    )
+    expect(result.x).toBeCloseTo((800 - 333.33 * 0.75) / 2, 5)
+    expect(result.y).toBeCloseTo((600 - 111.11 * 0.75) / 2, 5)
+    expect(result.scale).toBe(0.75)
+  })
+
+  // Case 7: zero/invalid dimensions → returns original offset, never NaN
+  it('returns original offset for zero/negative wrapper and container dimensions', () => {
+    const transform = { x: -42, y: 99, scale: 1 }
+    // wrapperWidth=0 → projectContainAxis returns desiredOffset
+    expect(projectContainTransform(transform, { width: 100, height: 100 }, 0, 600).x).toBe(-42)
+    // containerWidth=-1 → projectContainAxis returns desiredOffset
+    expect(projectContainTransform(transform, { width: -1, height: 100 }, 800, 600).x).toBe(-42)
+    // scale=0 → projectContainAxis returns desiredOffset
+    expect(
+      projectContainTransform({ x: -42, y: 99, scale: 0 }, { width: 100, height: 100 }, 800, 600).x
+    ).toBe(-42)
+    // NaN in wrapperHeight → returns desiredOffset
+    expect(projectContainTransform(transform, { width: 100, height: 100 }, 800, NaN).y).toBe(99)
+    // Infinity in containerWidth → returns desiredOffset
+    expect(projectContainTransform(transform, { width: Infinity, height: 100 }, 800, 600).x).toBe(-42)
+    // 全部无效 → 原样返回，不会产生 NaN
+    const bad = projectContainTransform(
+      { x: 0, y: 0, scale: NaN },
+      { width: 0, height: -1 },
+      0,
+      0
+    )
+    expect(Number.isNaN(bad.x)).toBe(false)
+    expect(Number.isNaN(bad.y)).toBe(false)
   })
 })

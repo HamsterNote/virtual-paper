@@ -110,6 +110,7 @@ type HarnessProps = Partial<UseVirtualPaperInteractionArgs> & {
   transform?: VirtualPaperTransform
   updateTransform?: VirtualPaperTransformUpdater
   endTransform?: VirtualPaperTransformUpdater
+  containMode?: boolean
 }
 
 const defaultTransform = { x: 10, y: 20, scale: 1 }
@@ -120,7 +121,8 @@ function TestHarness({
   minScale = 0.25,
   maxScale = 4,
   updateTransform = vi.fn(),
-  endTransform = vi.fn()
+  endTransform = vi.fn(),
+  containMode = false
 }: HarnessProps) {
   const wrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -133,7 +135,8 @@ function TestHarness({
     minScale,
     maxScale,
     updateTransform,
-    endTransform
+    endTransform,
+    containMode
   })
 
   return (
@@ -195,10 +198,31 @@ describe('useMultiDragInteractions', () => {
       if (this.getAttribute('data-testid') === 'container') {
         return makeRect(300, 200)
       }
+      if (this.getAttribute('data-testid') === 'wrapper') {
+        return makeRect(500, 400)
+      }
 
       return originalGetBoundingClientRect.call(this)
     }
   })
+
+  // 为 containMode 测试设置 wrapper clientWidth/Height 和 container offsetWidth/Height。
+  // jsdom 中这些属性默认为 0，需要用 Object.defineProperty 注入可控值。
+  const setupContainMocks = (
+    wrapperEl: HTMLElement,
+    containerEl: HTMLElement,
+    sizes: {
+      wrapperWidth: number
+      wrapperHeight: number
+      containerWidth: number
+      containerHeight: number
+    }
+  ): void => {
+    Object.defineProperty(wrapperEl, 'clientWidth', { value: sizes.wrapperWidth, configurable: true })
+    Object.defineProperty(wrapperEl, 'clientHeight', { value: sizes.wrapperHeight, configurable: true })
+    Object.defineProperty(containerEl, 'offsetWidth', { value: sizes.containerWidth, configurable: true })
+    Object.defineProperty(containerEl, 'offsetHeight', { value: sizes.containerHeight, configurable: true })
+  }
 
   afterEach(() => {
     cleanup()
@@ -603,5 +627,223 @@ describe('useMultiDragInteractions', () => {
     ).toHaveBeenCalledTimes(1)
     const panTransform = updateTransform.mock.calls[0][0] as VirtualPaperTransform
     expect(panTransform).toEqual({ x: 70, y: 60, scale: 1 })
+  })
+
+  // ─────────────────────────────────────────────────────────────────────
+  // containMode: 鼠标拖拽超大内容时投影到不露空白的合法范围
+  // container 600x500 > wrapper 500x400 → overflow on both axes
+  // clamp: x ∈ [500-600, 0] = [-100, 0], y ∈ [400-500, 0] = [-100, 0]
+  // ─────────────────────────────────────────────────────────────────────
+  it('clamps mouse drag pan to no-blank bounds when containMode is true', () => {
+    const updateTransform = vi.fn()
+    const endTransform = vi.fn()
+    render(
+      <TestHarness
+        transform={{ x: 0, y: 0, scale: 1 }}
+        enabledInteractions={[VirtualPaperInteractionMode.MouseDragPan]}
+        minScale={0.25}
+        maxScale={4}
+        updateTransform={updateTransform}
+        endTransform={endTransform}
+        containMode
+      />
+    )
+
+    const wrapper = screen.getByTestId('wrapper')
+    const container = screen.getByTestId('container')
+    setupContainMocks(wrapper, container, {
+      wrapperWidth: 500,
+      wrapperHeight: 400,
+      containerWidth: 600,
+      containerHeight: 500
+    })
+
+    const instance = getLastInstance()
+    instance.trigger('start', [makeFinger('mouse')])
+
+    // 在合法范围内 (-50, -80) → 不 clamp，原样通过
+    instance.options.setPose?.(container, {
+      position: { x: -50, y: -80 },
+      scale: 1
+    })
+    expect(updateTransform).toHaveBeenCalledWith(
+      { x: -50, y: -80, scale: 1 },
+      expect.objectContaining({ phase: 'change' })
+    )
+
+    // 超出范围 (-150, -120) → clamp 到边界 (-100, -100)
+    updateTransform.mockClear()
+    instance.options.setPose?.(container, {
+      position: { x: -150, y: -120 },
+      scale: 1
+    })
+    expect(updateTransform).toHaveBeenCalledWith(
+      { x: -100, y: -100, scale: 1 },
+      expect.objectContaining({ phase: 'change' })
+    )
+
+    // 正方向超出 (110, 80) → clamp 到 0
+    updateTransform.mockClear()
+    instance.options.setPose?.(container, {
+      position: { x: 110, y: 80 },
+      scale: 1
+    })
+    expect(updateTransform).toHaveBeenCalledWith(
+      { x: 0, y: 0, scale: 1 },
+      expect.objectContaining({ phase: 'change' })
+    )
+  })
+
+  // ─────────────────────────────────────────────────────────────────────
+  // containMode: 触摸单指拖拽超大内容时投影到不露空白的合法范围
+  // container 600x500 > wrapper 500x400 → clamp: x ∈ [-100, 0], y ∈ [-100, 0]
+  // ─────────────────────────────────────────────────────────────────────
+  it('clamps touch single-finger pan to no-blank bounds when containMode is true', () => {
+    const updateTransform = vi.fn()
+    render(
+      <TestHarness
+        transform={{ x: -50, y: -50, scale: 1 }}
+        enabledInteractions={[VirtualPaperInteractionMode.TouchSingleFingerPan]}
+        minScale={0.25}
+        maxScale={4}
+        updateTransform={updateTransform}
+        containMode
+      />
+    )
+
+    const wrapper = screen.getByTestId('wrapper')
+    const container = screen.getByTestId('container')
+    setupContainMocks(wrapper, container, {
+      wrapperWidth: 500,
+      wrapperHeight: 400,
+      containerWidth: 600,
+      containerHeight: 500
+    })
+
+    const instance = getLastInstance()
+    const finger = makeFinger('touch')
+    instance.trigger('start', [finger])
+
+    // 从 (-50, -50) 拖 delta (-20, -30) → nextTransform (-70, -80) → 合法范围内
+    instance.options.setPose?.(container, {
+      position: { x: -70, y: -80 },
+      scale: 1
+    })
+    expect(updateTransform).toHaveBeenCalledWith(
+      { x: -70, y: -80, scale: 1 },
+      expect.objectContaining({ phase: 'change' })
+    )
+
+    // 从 (-50, -50) 拖 delta (200, 200) → nextTransform (150, 150) → clamp 到 (0, 0)
+    updateTransform.mockClear()
+    instance.options.setPose?.(container, {
+      position: { x: 150, y: 150 },
+      scale: 1
+    })
+    expect(updateTransform).toHaveBeenCalledWith(
+      { x: 0, y: 0, scale: 1 },
+      expect.objectContaining({ phase: 'change' })
+    )
+  })
+
+  // ─────────────────────────────────────────────────────────────────────
+  // containMode: 双指缩放时 fitted 轴居中，overflow 轴 clamp
+  // wrapper 500x400, container 600x150
+  // scale 2: scaledX=1200 > 500 → clamp, scaledY=300 ≤ 400 → center at 50
+  // ─────────────────────────────────────────────────────────────────────
+  it('centers the fitted axis and clamps the overflow axis after anchor zoom with containMode', () => {
+    const updateTransform = vi.fn()
+    render(
+      <TestHarness
+        transform={{ x: 0, y: 0, scale: 1 }}
+        enabledInteractions={[VirtualPaperInteractionMode.TouchTwoFingerZoom]}
+        minScale={0.25}
+        maxScale={4}
+        updateTransform={updateTransform}
+        containMode
+      />
+    )
+
+    const wrapper = screen.getByTestId('wrapper')
+    const container = screen.getByTestId('container')
+    setupContainMocks(wrapper, container, {
+      wrapperWidth: 500,
+      wrapperHeight: 400,
+      containerWidth: 600,
+      containerHeight: 150
+    })
+
+    const instance = getLastInstance()
+    const fingerA = makeFingerWithPoint('touch', true, { x: 100, y: 100 })
+    const fingerB = makeFingerWithPoint('touch', false, { x: 300, y: 100 })
+
+    instance.trigger('start', [fingerA, fingerB])
+
+    // scale 1→2, midpoint = (200, 100) in wrapper coords
+    // anchor: x = 200 - 200*2 = -200, y = 100 - 100*2 = -100
+    // contain: x scaled=1200>500 → clamp(-200, [500-1200, 0]) = -200
+    //          y scaled=300≤400 → center = (400-300)/2 = 50
+    instance.options.setPose?.(container, { scale: 2 })
+
+    expect(updateTransform).toHaveBeenCalledWith(
+      { x: -200, y: 50, scale: 2 },
+      expect.objectContaining({ phase: 'change' })
+    )
+  })
+
+  // ─────────────────────────────────────────────────────────────────────
+  // containMode: multi→single 屏蔽回归 — containMode 不破坏现有行为
+  // ─────────────────────────────────────────────────────────────────────
+  it('multi→single block still passes with containMode true (regression)', () => {
+    const updateTransform = vi.fn()
+    const endTransform = vi.fn()
+    render(
+      <TestHarness
+        transform={{ x: 0, y: 0, scale: 1 }}
+        enabledInteractions={[
+          VirtualPaperInteractionMode.TouchSingleFingerPan,
+          VirtualPaperInteractionMode.TouchTwoFingerZoom
+        ]}
+        minScale={0.25}
+        maxScale={4}
+        updateTransform={updateTransform}
+        endTransform={endTransform}
+        containMode
+      />
+    )
+
+    const wrapper = screen.getByTestId('wrapper')
+    const container = screen.getByTestId('container')
+    setupContainMocks(wrapper, container, {
+      wrapperWidth: 500,
+      wrapperHeight: 400,
+      containerWidth: 600,
+      containerHeight: 500
+    })
+
+    const instance = getLastInstance()
+
+    const fingerA = makeFingerWithPoint('touch', true, { x: 100, y: 100 })
+    const fingerB = makeFingerWithPoint('touch', false, { x: 300, y: 100 })
+
+    // 双指按下
+    instance.trigger('start', [fingerA, fingerB])
+    // 缩放中
+    instance.options.setPose?.(container, { scale: 2 })
+    expect(updateTransform).toHaveBeenCalledTimes(1)
+
+    // fingerA 抬起（模拟真实库顺序）
+    instance.fingers = [fingerB]
+    instance.options.setPoseOnEnd?.(container, { scale: 2, position: { x: 50, y: 30 } })
+    expect(endTransform).toHaveBeenCalledTimes(1)
+    expect(endTransform.mock.calls[0][0]).toEqual({ x: 0, y: 0, scale: 2 })
+
+    // 触发 end 事件（设置 multi→single 屏蔽）
+    instance.trigger('end', [fingerB])
+
+    // 剩下 fingerB 继续 move → 应被屏蔽
+    updateTransform.mockClear()
+    instance.options.setPose?.(container, { scale: 2, position: { x: 80, y: 40 } })
+    expect(updateTransform).not.toHaveBeenCalled()
   })
 })

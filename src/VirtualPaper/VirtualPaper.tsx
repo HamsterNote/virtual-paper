@@ -18,6 +18,7 @@ import {
   serializeTransform,
   mergeDefaultTransform
 } from './transform'
+import { projectContainTransformForElements } from './containMode'
 import { useMultiDragInteractions } from './useMultiDragInteractions'
 import { useWheelInteractions } from './useWheelInteractions'
 import './VirtualPaper.css'
@@ -27,6 +28,7 @@ export const VirtualPaper = ({
   enabledInteractions = DEFAULT_ENABLED_INTERACTIONS,
   initialPlacement = VirtualPaperInitialPlacement.Center,
   readerMode = false,
+  containMode = false,
   readerModeZoomDebounceMs,
   contentSize,
   transform: controlledTransform,
@@ -47,11 +49,23 @@ export const VirtualPaper = ({
   const warnedMissingContentSizeRef = useRef(false)
   const isControlled = controlledTransform !== undefined
   const isReaderMode = readerMode === true
+  const isContainMode = containMode === true && !isReaderMode
 
   const [uncontrolledTransform, setUncontrolledTransform] = useState<VirtualPaperTransform>(() => {
     const base = { x: 0, y: 0, scale: 1 }
     return mergeDefaultTransform(base, defaultTransform, minScale, maxScale)
   })
+  const [containRevision, setContainRevision] = useState(0)
+
+  const projectForContain = useCallback((next: VirtualPaperTransform): VirtualPaperTransform => {
+    if (!isContainMode) return next
+
+    const wrapper = wrapperRef.current
+    const container = containerRef.current
+    if (!wrapper || !container) return next
+
+    return projectContainTransformForElements(next, wrapper, container)
+  }, [isContainMode])
 
   useLayoutEffect(() => {
     if (isControlled) return
@@ -72,10 +86,11 @@ export const VirtualPaper = ({
     })
 
     const merged = mergeDefaultTransform(initial, defaultTransform, minScale, maxScale)
-    setUncontrolledTransform(merged)
+    const projected = projectForContain(merged)
+    setUncontrolledTransform(projected)
 
     if (onTransformChange) {
-      onTransformChange(merged, {
+      onTransformChange(projected, {
         source: 'initialPlacement',
         inputType: 'programmatic',
         phase: 'change'
@@ -84,6 +99,34 @@ export const VirtualPaper = ({
   }, [])
 
   const transform = isControlled ? controlledTransform : uncontrolledTransform
+  const displayTransform = useMemo(() => {
+    void containRevision
+    return isContainMode ? projectForContain(transform) : transform
+  }, [containRevision, isContainMode, projectForContain, transform])
+
+  useLayoutEffect(() => {
+    if (!isContainMode || isReaderMode) return
+
+    const wrapper = wrapperRef.current
+    const container = containerRef.current
+    if (!wrapper || !container) return
+
+    const bumpContainRevision = () => {
+      setContainRevision((revision) => revision + 1)
+    }
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(bumpContainRevision)
+      observer.observe(wrapper)
+      observer.observe(container)
+      bumpContainRevision()
+      return () => observer.disconnect()
+    }
+
+    bumpContainRevision()
+    window.addEventListener('resize', bumpContainRevision)
+    return () => window.removeEventListener('resize', bumpContainRevision)
+  }, [isContainMode, isReaderMode])
 
   const updateTransform = useCallback((
     next: VirtualPaperTransform,
@@ -109,7 +152,7 @@ export const VirtualPaper = ({
     }
   }, [isControlled, onTransformChangeEnd])
 
-  const transformStyle = useMemo(() => serializeTransform(transform), [transform])
+  const transformStyle = useMemo(() => serializeTransform(displayTransform), [displayTransform])
 
   const getReaderContentSize = useCallback(() => {
     const wrapper = wrapperRef.current
@@ -256,7 +299,7 @@ export const VirtualPaper = ({
   useMultiDragInteractions({
     wrapperRef,
     containerRef,
-    transform,
+    transform: displayTransform,
     enabledInteractions,
     minScale,
     maxScale,
@@ -264,13 +307,14 @@ export const VirtualPaper = ({
     updateTransform,
     endTransform,
     isReaderMode,
+    containMode: isContainMode,
     readerModeZoomDebounceMs
   })
 
   useWheelInteractions({
     wrapperRef,
     containerRef,
-    transform,
+    transform: displayTransform,
     enabledInteractions,
     minScale,
     maxScale,
@@ -278,6 +322,7 @@ export const VirtualPaper = ({
     updateTransform,
     endTransform,
     isReaderMode,
+    containMode: isContainMode,
     readerModeZoomDebounceMs
   })
 

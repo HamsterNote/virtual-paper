@@ -101,6 +101,41 @@ export const clampReaderTransform = (
 }
 
 /**
+ * 纯几何 helper：将 transform 投影到 "contain" 约束下。
+ * 当 container * scale <= wrapper 时居中；否则 clamp 到 [wrapper - scaledSize, 0]。
+ * 不修改 scale，不进行四舍五入。
+ */
+export const projectContainTransform = (
+  transform: VirtualPaperTransform,
+  containerSize: { width: number; height: number },
+  wrapperWidth: number,
+  wrapperHeight: number
+): VirtualPaperTransform => {
+  const projectContainAxis = (
+    desiredOffset: number,
+    wrapperSize: number,
+    containerSize: number,
+    scale: number
+  ): number => {
+    // 任意维度非有限数 → 原样返回 desiredOffset，避免 NaN 传播
+    if (![desiredOffset, wrapperSize, containerSize, scale].every(Number.isFinite)) return desiredOffset
+    // 零或负尺寸 → 原样返回 desiredOffset
+    if (wrapperSize <= 0 || containerSize <= 0 || scale <= 0) return desiredOffset
+    const scaledSize = containerSize * scale
+    // container 缩放后 ≤ wrapper → 居中
+    if (scaledSize <= wrapperSize) return (wrapperSize - scaledSize) / 2
+    // container 缩放后 > wrapper → clamp 到 [wrapper - scaledSize, 0]
+    return Math.min(Math.max(desiredOffset, wrapperSize - scaledSize), 0)
+  }
+
+  return {
+    x: projectContainAxis(transform.x, wrapperWidth, containerSize.width, transform.scale),
+    y: projectContainAxis(transform.y, wrapperHeight, containerSize.height, transform.scale),
+    scale: transform.scale
+  }
+}
+
+/**
  * 将 transform 转换为 layout 信息（尺寸 + 滚动位置），
  * 先 clamp 再计算 width/height/scrollLeft/scrollTop。
  */

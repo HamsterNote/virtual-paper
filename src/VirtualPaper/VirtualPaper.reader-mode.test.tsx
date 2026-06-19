@@ -294,4 +294,62 @@ describe('VirtualPaper readerMode', () => {
     const lastWheelArgs = wheelCalls[wheelCalls.length - 1][0]
     expect(lastWheelArgs.isReaderMode).toBe(true)
   })
+
+  // R12: containMode={true} is ignored in readerMode — wrapper still uses overflow:auto
+  it('R12: containMode={true} ignored in readerMode — wrapper still uses overflow:auto', () => {
+    render(
+      <VirtualPaper
+        containMode
+        readerMode
+        transform={{ x: 0, y: 0, scale: 1 }}
+        contentSize={{ width: 1000, height: 2000 }}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const wrapper = screen.getByTestId('virtual-paper-wrapper')
+    expect(wrapper.style.overflow).toBe('auto')
+  })
+
+  // R13: containMode={true} in readerMode — container size from convertTransformToLayout
+  it('R13: containMode={true} in readerMode — container size from convertTransformToLayout (1000x2000 @ scale=1)', () => {
+    render(
+      <VirtualPaper
+        containMode
+        readerMode
+        transform={{ x: 0, y: 0, scale: 1 }}
+        contentSize={{ width: 1000, height: 2000 }}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
+    expect(container.style.width).toBe('1000px')
+    expect(container.style.height).toBe('2000px')
+    expect(container.style.transform).toBe('')
+  })
+
+  // R14: containMode={true} in readerMode — scroll sync unchanged (same as R7 baseline)
+  it('R14: containMode={true} in readerMode — scroll sync still maps to negative scroll values', () => {
+    const onTransformChange = vi.fn()
+    render(
+      <VirtualPaper
+        containMode
+        readerMode
+        transform={{ x: 0, y: 0, scale: 1 }}
+        contentSize={{ width: 1000, height: 2000 }}
+        onTransformChange={onTransformChange}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const wrapper = screen.getByTestId('virtual-paper-wrapper')
+    wrapper.scrollLeft = 300
+    wrapper.scrollTop = 700
+    wrapper.dispatchEvent(new Event('scroll', { bubbles: true }))
+    expect(onTransformChange).toHaveBeenCalledWith(
+      expect.objectContaining({ x: -300, y: -700 }),
+      expect.objectContaining({ source: 'TrackpadScrollPan' })
+    )
+  })
 })

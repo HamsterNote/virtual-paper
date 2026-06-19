@@ -12,6 +12,7 @@ import {
   clampScale,
   validateReaderModeZoomDebounceMs
 } from './transform'
+import { projectContainTransformForElements } from './containMode'
 import {
   type UseVirtualPaperInteractionArgs,
   type VirtualPaperInteractionMode as VirtualPaperInteractionModeType,
@@ -192,6 +193,7 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
     updateTransform,
     endTransform,
     isReaderMode,
+    containMode,
     readerModeZoomDebounceMs
   } = args
 
@@ -202,6 +204,7 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
   const updateTransformRef = useRef(updateTransform)
   const endTransformRef = useRef(endTransform)
   const isReaderModeRef = useRef(isReaderMode)
+  const containModeRef = useRef(containMode)
   const readerModeZoomDebounceMsRef = useRef(readerModeZoomDebounceMs)
   const readerZoomEndTimerRef = useRef<number | null>(null)
   const activeGestureRef = useRef<ActivePointerGesture | null>(null)
@@ -227,6 +230,7 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
   updateTransformRef.current = updateTransform
   endTransformRef.current = endTransform
   isReaderModeRef.current = isReaderMode
+  containModeRef.current = containMode
   readerModeZoomDebounceMsRef.current = readerModeZoomDebounceMs
 
   const flags = getPointerModeFlags(enabledInteractions)
@@ -355,6 +359,15 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
           contentSizeRef.current,
           wrapperRef.current.clientWidth,
           wrapperRef.current.clientHeight
+        )
+      }
+
+      // contain 约束：非阅读模式下，将变换投影到 wrapper 内不露空白的合法范围
+      if (containModeRef.current && !isReaderModeRef.current && wrapperRef.current && containerRef.current) {
+        nextTransform = projectContainTransformForElements(
+          nextTransform,
+          wrapperRef.current,
+          containerRef.current
         )
       }
 
