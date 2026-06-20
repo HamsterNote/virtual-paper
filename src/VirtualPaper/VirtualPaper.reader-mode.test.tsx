@@ -1,7 +1,9 @@
 import '@testing-library/jest-dom/vitest'
+// allow: SIZE_OK — Existing reader-mode regression suite intentionally keeps R1–R14, layout, and scroll-sync matrices together; splitting tests is outside this verification-only Todo.
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { VirtualPaper } from './VirtualPaper'
+import { computeReaderLayoutMetrics, convertTransformToLayout } from './transform'
 import { useMultiDragInteractions } from './useMultiDragInteractions'
 import { useWheelInteractions } from './useWheelInteractions'
 
@@ -21,6 +23,33 @@ describe('VirtualPaper readerMode', () => {
     'offsetHeight'
   ] as const
   const scrollProps = ['scrollLeft', 'scrollTop'] as const
+  const wrapperSize = { width: 500, height: 500 } as const
+  const readerScrollSyncCases = [
+    {
+      label: 'both axes fit',
+      contentSize: { width: 200, height: 100 },
+      transform: { x: -120, y: -80, scale: 1 },
+      manualScroll: { left: 0, top: 0 }
+    },
+    {
+      label: 'X overflow / Y fit',
+      contentSize: { width: 1000, height: 100 },
+      transform: { x: -200, y: -80, scale: 1 },
+      manualScroll: { left: 240, top: 0 }
+    },
+    {
+      label: 'X fit / Y overflow',
+      contentSize: { width: 200, height: 1000 },
+      transform: { x: -120, y: -260, scale: 1 },
+      manualScroll: { left: 0, top: 260 }
+    },
+    {
+      label: 'both axes overflow',
+      contentSize: { width: 1000, height: 2000 },
+      transform: { x: -300, y: -400, scale: 1 },
+      manualScroll: { left: 280, top: 420 }
+    }
+  ] as const
   let scrollStore = new WeakMap<HTMLElement, { scrollLeft: number; scrollTop: number }>()
 
   const getScroll = (el: HTMLElement) => {
@@ -29,6 +58,22 @@ describe('VirtualPaper readerMode', () => {
     const next = { scrollLeft: 0, scrollTop: 0 }
     scrollStore.set(el, next)
     return next
+  }
+
+  const expectReaderAxisSync = (
+    actualScroll: number,
+    expectedTransformOffset: number,
+    maxScroll: number
+  ) => {
+    if (maxScroll === 0) {
+      expect(actualScroll).toBe(0)
+      expect(actualScroll).not.toBeGreaterThan(0)
+      expect(expectedTransformOffset).toBe(0)
+      return
+    }
+
+    expect(actualScroll).toBeCloseTo(-expectedTransformOffset, 0)
+    expect(expectedTransformOffset).toBeLessThanOrEqual(0)
   }
 
   beforeEach(() => {
@@ -113,8 +158,7 @@ describe('VirtualPaper readerMode', () => {
     expect(wrapper.style.overflow).toBe('auto')
   })
 
-  // R2: container uses document flow (no position:absolute, no CSS transform)
-  it('R2: container uses document flow with no CSS transform in readerMode', () => {
+  it('R1b: container allows native touch pan in readerMode', () => {
     render(
       <VirtualPaper
         readerMode
@@ -125,8 +169,26 @@ describe('VirtualPaper readerMode', () => {
       </VirtualPaper>
     )
     const container = screen.getByTestId('virtual-paper-container')
+    expect(container.style.touchAction).toBe('pan-x pan-y')
+  })
+
+  // R2: container uses document flow (no position:absolute, no CSS transform/flex/grid)
+  it('R2: container uses document flow with no CSS transform/flex/grid in readerMode', () => {
+    render(
+      <VirtualPaper
+        readerMode
+        transform={{ x: 0, y: 0, scale: 1 }}
+        contentSize={{ width: 1000, height: 2000 }}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
+    expect(container.style.position).toBe('relative')
     expect(container.style.position).not.toBe('absolute')
     expect(container.style.transform).toBe('')
+    expect(container.style.display).not.toBe('flex')
+    expect(container.style.display).not.toBe('grid')
   })
 
   // R3: container size = contentSize * scale (scale=1, content 1000x2000)
@@ -351,5 +413,243 @@ describe('VirtualPaper readerMode', () => {
       expect.objectContaining({ x: -300, y: -700 }),
       expect.objectContaining({ source: 'TrackpadScrollPan' })
     )
+  })
+
+  it('R15: edgeElasticScroll in readerMode keeps native scroll layout with no rubber-band transform', () => {
+    render(
+      <VirtualPaper
+        containMode
+        edgeElasticScroll
+        readerMode
+        transform={{ x: 0, y: 0, scale: 1 }}
+        contentSize={{ width: 1000, height: 2000 }}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    const wrapper = screen.getByTestId('virtual-paper-wrapper')
+    const container = screen.getByTestId('virtual-paper-container')
+    const wheelCalls = vi.mocked(useWheelInteractions).mock.calls
+    const lastWheelArgs = wheelCalls[wheelCalls.length - 1][0]
+
+    expect(lastWheelArgs.isReaderMode).toBe(true)
+    expect(lastWheelArgs.containMode).toBe(false)
+    expect(lastWheelArgs.edgeElasticScroll).toBe(true)
+    expect(wrapper.style.overflow).toBe('auto')
+    expect(container.style.position).toBe('relative')
+    expect(container.style.transform).toBe('')
+  })
+
+  // ---- Axis-combination layout tests (Todo 3) ----
+
+  // L1: both axes fit → marginLeft > 0, marginTop > 0, no scroll
+  it('L1: both axes fit → marginLeft > 0, marginTop > 0, width/height scaled, no scroll', () => {
+    render(
+      <VirtualPaper
+        readerMode
+        transform={{ x: 0, y: 0, scale: 1 }}
+        contentSize={{ width: 200, height: 100 }}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const wrapper = screen.getByTestId('virtual-paper-wrapper')
+    const container = screen.getByTestId('virtual-paper-container')
+    // wrapper 500x500, content 200x100 -> offsetX = (500-200)/2 = 150, offsetY = (500-100)/2 = 200
+    expect(container.style.marginLeft).toBe('150px')
+    expect(container.style.marginTop).toBe('200px')
+    expect(container.style.width).toBe('200px')
+    expect(container.style.height).toBe('100px')
+    expect(wrapper.scrollLeft).toBe(0)
+    expect(wrapper.scrollTop).toBe(0)
+    // style restrictions
+    expect(container.style.position).toBe('relative')
+    expect(container.style.transform).toBe('')
+    expect(container.style.display).not.toBe('flex')
+    expect(container.style.display).not.toBe('grid')
+  })
+
+  // L2: X overflows / Y fits → marginLeft = 0, marginTop > 0, scrollLeft > 0, scrollTop = 0
+  it('L2: X overflow / Y fit → marginLeft = 0, marginTop > 0, scrollLeft > 0, scrollTop = 0', () => {
+    render(
+      <VirtualPaper
+        readerMode
+        transform={{ x: -200, y: 0, scale: 1 }}
+        contentSize={{ width: 1000, height: 100 }}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const wrapper = screen.getByTestId('virtual-paper-wrapper')
+    const container = screen.getByTestId('virtual-paper-container')
+    // wrapper 500x500, content 1000x100 -> offsetX = max((500-1000)/2,0)=0, offsetY=(500-100)/2=200
+    expect(container.style.marginLeft).toBe('0px')
+    expect(container.style.marginTop).toBe('200px')
+    expect(container.style.width).toBe('1000px')
+    expect(container.style.height).toBe('100px')
+    expect(wrapper.scrollLeft).toBe(200)
+    expect(wrapper.scrollTop).toBe(0)
+    expect(container.style.position).toBe('relative')
+    expect(container.style.transform).toBe('')
+    expect(container.style.display).not.toBe('flex')
+    expect(container.style.display).not.toBe('grid')
+  })
+
+  // L3: X fits / Y overflows → marginLeft > 0, marginTop = 0, scrollLeft = 0, scrollTop > 0
+  it('L3: X fit / Y overflow → marginLeft > 0, marginTop = 0, scrollLeft = 0, scrollTop > 0', () => {
+    render(
+      <VirtualPaper
+        readerMode
+        transform={{ x: 0, y: -200, scale: 1 }}
+        contentSize={{ width: 200, height: 1000 }}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const wrapper = screen.getByTestId('virtual-paper-wrapper')
+    const container = screen.getByTestId('virtual-paper-container')
+    // wrapper 500x500, content 200x1000 -> offsetX=(500-200)/2=150, offsetY=max((500-1000)/2,0)=0
+    expect(container.style.marginLeft).toBe('150px')
+    expect(container.style.marginTop).toBe('0px')
+    expect(container.style.width).toBe('200px')
+    expect(container.style.height).toBe('1000px')
+    expect(wrapper.scrollLeft).toBe(0)
+    expect(wrapper.scrollTop).toBe(200)
+    expect(container.style.position).toBe('relative')
+    expect(container.style.transform).toBe('')
+    expect(container.style.display).not.toBe('flex')
+    expect(container.style.display).not.toBe('grid')
+  })
+
+  // L4: both axes overflow → marginLeft = 0, marginTop = 0, scroll mirrors negative transform
+  it('L4: both axes overflow → marginLeft = 0, marginTop = 0, scroll mirrors negative transform', () => {
+    render(
+      <VirtualPaper
+        readerMode
+        transform={{ x: -300, y: -400, scale: 1 }}
+        contentSize={{ width: 1000, height: 2000 }}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const wrapper = screen.getByTestId('virtual-paper-wrapper')
+    const container = screen.getByTestId('virtual-paper-container')
+    expect(container.style.marginLeft).toBe('0px')
+    expect(container.style.marginTop).toBe('0px')
+    expect(container.style.width).toBe('1000px')
+    expect(container.style.height).toBe('2000px')
+    expect(wrapper.scrollLeft).toBe(300)
+    expect(wrapper.scrollTop).toBe(400)
+    expect(container.style.position).toBe('relative')
+    expect(container.style.transform).toBe('')
+    expect(container.style.display).not.toBe('flex')
+    expect(container.style.display).not.toBe('grid')
+  })
+
+  it.each(readerScrollSyncCases)('S1: transform → native scroll sync keeps centered fit axes at zero ($label)', ({ contentSize, transform }) => {
+    render(
+      <VirtualPaper
+        readerMode
+        transform={transform}
+        contentSize={contentSize}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    const wrapper = screen.getByTestId('virtual-paper-wrapper')
+    const metrics = computeReaderLayoutMetrics(
+      contentSize,
+      transform.scale,
+      wrapperSize.width,
+      wrapperSize.height,
+      transform
+    )
+    const layout = convertTransformToLayout(
+      transform,
+      contentSize,
+      wrapperSize.width,
+      wrapperSize.height
+    )
+
+    expect(wrapper.scrollLeft).toBe(Math.max(0, Math.round(layout.scrollLeft)))
+    expect(wrapper.scrollTop).toBe(Math.max(0, Math.round(layout.scrollTop)))
+    expectReaderAxisSync(wrapper.scrollLeft, metrics.boundedTransform.x, metrics.maxScrollLeft)
+    expectReaderAxisSync(wrapper.scrollTop, metrics.boundedTransform.y, metrics.maxScrollTop)
+  })
+
+  it.each(readerScrollSyncCases)('S2: native scroll → transform sync ignores fit axes ($label)', ({ contentSize, manualScroll }) => {
+    const onTransformChange = vi.fn()
+    render(
+      <VirtualPaper
+        readerMode
+        transform={{ x: 0, y: 0, scale: 1 }}
+        contentSize={contentSize}
+        onTransformChange={onTransformChange}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    const wrapper = screen.getByTestId('virtual-paper-wrapper')
+    act(() => {
+      wrapper.scrollLeft = manualScroll.left
+      wrapper.scrollTop = manualScroll.top
+      fireEvent.scroll(wrapper)
+    })
+
+    const metrics = computeReaderLayoutMetrics(
+      contentSize,
+      1,
+      wrapperSize.width,
+      wrapperSize.height,
+      { x: -manualScroll.left, y: -manualScroll.top, scale: 1 }
+    )
+    const expectedTransform = metrics.boundedTransform
+
+    expectReaderAxisSync(wrapper.scrollLeft, expectedTransform.x, metrics.maxScrollLeft)
+    expectReaderAxisSync(wrapper.scrollTop, expectedTransform.y, metrics.maxScrollTop)
+
+    if (expectedTransform.x === 0 && expectedTransform.y === 0) {
+      expect(onTransformChange).not.toHaveBeenCalled()
+      return
+    }
+
+    expect(onTransformChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        x: expectedTransform.x,
+        y: expectedTransform.y,
+        scale: expectedTransform.scale
+      }),
+      expect.objectContaining({ source: 'TrackpadScrollPan' })
+    )
+  })
+
+  // F2: sub-pixel scroll echo within tolerance does NOT update transform
+  it('F2: scroll echo within READER_PROGRAMMATIC_SCROLL_TOLERANCE_PX skips transform update', () => {
+    const onTransformChange = vi.fn()
+    render(
+      <VirtualPaper
+        readerMode
+        transform={{ x: -200, y: -500, scale: 1 }}
+        contentSize={{ width: 1000, height: 2000 }}
+        onTransformChange={onTransformChange}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const wrapper = screen.getByTestId('virtual-paper-wrapper')
+
+    // After render, the useLayoutEffect syncs transform→scroll and sets
+    // programmaticReaderScrollRef to the target (scrollLeft=200, scrollTop=500).
+    // Simulate browser sub-pixel rounding: shift by +0.5px (within 1px tolerance).
+    wrapper.scrollLeft = 200.5
+    wrapper.scrollTop = 500.5
+    fireEvent.scroll(wrapper)
+
+    // The scroll handler should recognize this as a programmatic echo
+    // and skip the transform update entirely.
+    expect(onTransformChange).not.toHaveBeenCalled()
   })
 })

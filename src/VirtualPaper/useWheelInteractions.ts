@@ -1,13 +1,18 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 
 import {
+  applyElasticContainResistance,
   applyZoomAnchor,
   clampReaderTransform,
   clampScale,
+  computeReaderLayoutMetrics,
+  convertReaderLayoutToTransform,
   validateReaderModeZoomDebounceMs
 } from './transform'
-import { projectContainTransformForElements } from './containMode'
+import { measureContainBox, projectContainTransformForElements } from './containMode'
+import { createElasticSettleController } from './elasticSettle'
 import {
+  type VirtualPaperContentSize,
   type UseVirtualPaperInteractionArgs,
   type VirtualPaperTransform,
   type VirtualPaperTransformMeta,
@@ -20,6 +25,16 @@ const WHEEL_ZOOM_SENSITIVITY = 0.002
 type WheelEndState = {
   transform: VirtualPaperTransform
   source: VirtualPaperInteractionMode
+  settleFrom?: VirtualPaperTransform
+}
+
+type ReaderWheelZoomTransformInput = {
+  readonly event: WheelEvent
+  readonly wrapper: HTMLDivElement
+  readonly contentSize: VirtualPaperContentSize
+  readonly current: VirtualPaperTransform
+  readonly minScale: number
+  readonly maxScale: number
 }
 
 const createWheelMeta = (
@@ -47,12 +62,84 @@ const getWheelZoomTransform = (
   return applyZoomAnchor(current, nextScale, localX, localY)
 }
 
+const getReaderWheelZoomTransform = ({
+  event,
+  wrapper,
+  contentSize,
+  current,
+  minScale,
+  maxScale
+}: ReaderWheelZoomTransformInput): VirtualPaperTransform => {
+  const wrapperWidth = wrapper.clientWidth
+  const wrapperHeight = wrapper.clientHeight
+  const wrapperRect = wrapper.getBoundingClientRect()
+  const localX = event.clientX - wrapperRect.left
+  const localY = event.clientY - wrapperRect.top
+  const currentMetrics = computeReaderLayoutMetrics(
+    contentSize,
+    current.scale,
+    wrapperWidth,
+    wrapperHeight,
+    current
+  )
+  const contentX = (currentMetrics.scrollLeft + localX - currentMetrics.offsetX) / current.scale
+  const contentY = (currentMetrics.scrollTop + localY - currentMetrics.offsetY) / current.scale
+  const zoomFactor = Math.exp(-event.deltaY * WHEEL_ZOOM_SENSITIVITY)
+  const nextScale = clampScale(current.scale * zoomFactor, minScale, maxScale)
+  const nextMetrics = computeReaderLayoutMetrics(
+    contentSize,
+    nextScale,
+    wrapperWidth,
+    wrapperHeight,
+    { x: 0, y: 0, scale: nextScale }
+  )
+  const desiredScrollLeft = contentX * nextScale + nextMetrics.offsetX - localX
+  const desiredScrollTop = contentY * nextScale + nextMetrics.offsetY - localY
+  const clampedScrollLeft = Math.min(
+    Math.max(desiredScrollLeft, 0),
+    nextMetrics.maxScrollLeft
+  )
+  const clampedScrollTop = Math.min(
+    Math.max(desiredScrollTop, 0),
+    nextMetrics.maxScrollTop
+  )
+
+  return convertReaderLayoutToTransform(
+    contentSize,
+    nextScale,
+    wrapperWidth,
+    wrapperHeight,
+    clampedScrollLeft,
+    clampedScrollTop
+  )
+}
+
 export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void {
   const latestArgsRef = useRef(args)
   const wheelEndTimerRef = useRef<number | null>(null)
   const wheelEndStateRef = useRef<WheelEndState | null>(null)
+  const settleCancelRef = useRef<(() => void) | null>(null)
+  const elasticActiveRefRef = useRef(args.elasticActiveRef)
+  const updateTransformRef = useRef(args.updateTransform)
+  const endTransformRef = useRef(args.endTransform)
 
   latestArgsRef.current = args
+  elasticActiveRefRef.current = args.elasticActiveRef
+  updateTransformRef.current = args.updateTransform
+  endTransformRef.current = args.endTransform
+
+  const {
+    setElasticActive,
+    cancelSettleAnimation,
+    transformsMatch,
+    settleElasticTransform
+  } = useMemo(() => createElasticSettleController({
+    elasticActiveRefRef,
+    settleCancelRef,
+    updateTransformRef,
+    endTransformRef,
+    emitInitialUpdate: false
+  }), [])
 
   const finishWheelTransform = useCallback(() => {
     const wheelEndState = wheelEndStateRef.current
@@ -61,21 +148,31 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
       return
     }
 
-    latestArgsRef.current.endTransform(
-      wheelEndState.transform,
-      createWheelMeta(wheelEndState.source, 'end')
-    )
+    const endMeta = {
+      source: wheelEndState.source,
+      inputType: 'wheel' as const,
+      phase: 'end' as const
+    }
+    if (wheelEndState.settleFrom && !transformsMatch(wheelEndState.settleFrom, wheelEndState.transform)) {
+      settleElasticTransform(wheelEndState.settleFrom, wheelEndState.transform, endMeta)
+    } else {
+      setElasticActive(false)
+      endTransformRef.current(wheelEndState.transform, endMeta)
+    }
     wheelEndStateRef.current = null
     wheelEndTimerRef.current = null
-  }, [])
+  }, [setElasticActive, settleElasticTransform, transformsMatch])
 
   const scheduleWheelEnd = useCallback(
     (
       transform: VirtualPaperTransform,
       source: VirtualPaperInteractionMode,
-      debounceMs: number
+      debounceMs: number,
+      settleFrom?: VirtualPaperTransform
     ) => {
-      wheelEndStateRef.current = { transform, source }
+      wheelEndStateRef.current = settleFrom
+        ? { transform, source, settleFrom }
+        : { transform, source }
 
       if (wheelEndTimerRef.current !== null) {
         window.clearTimeout(wheelEndTimerRef.current)
@@ -104,6 +201,7 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
         updateTransform,
         isReaderMode,
         containMode,
+        edgeElasticScroll,
         readerModeZoomDebounceMs
       } = latestArgsRef.current
       const wrapper = wrapperRef.current
@@ -121,13 +219,22 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
       if (event.ctrlKey || event.metaKey) {
         if (hasInteraction(VirtualPaperInteractionMode.MouseWheelCtrlZoom) && wrapper) {
           source = VirtualPaperInteractionMode.MouseWheelCtrlZoom
-          nextTransform = getWheelZoomTransform(
-            event,
-            wrapper,
-            transform,
-            minScale,
-            maxScale
-          )
+          nextTransform = isReaderMode && contentSize
+            ? getReaderWheelZoomTransform({
+                event,
+                wrapper,
+                contentSize,
+                current: transform,
+                minScale,
+                maxScale
+              })
+            : getWheelZoomTransform(
+                event,
+                wrapper,
+                transform,
+                minScale,
+                maxScale
+              )
         }
       } else if (hasInteraction(VirtualPaperInteractionMode.TrackpadScrollPan)) {
         source = VirtualPaperInteractionMode.TrackpadScrollPan
@@ -160,22 +267,73 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
         )
       }
 
+      cancelSettleAnimation()
+
+      let settleFrom: VirtualPaperTransform | undefined
+      let wheelEndTransform = nextTransform
       if (containMode && !isReaderMode && wrapper && containerRef.current) {
-        nextTransform = projectContainTransformForElements(nextTransform, wrapper, containerRef.current)
+        if (source === VirtualPaperInteractionMode.TrackpadScrollPan && edgeElasticScroll) {
+          const box = measureContainBox(wrapper, containerRef.current, nextTransform.scale)
+          if (box) {
+            const elasticResult = applyElasticContainResistance({
+              transform: nextTransform,
+              containerSize: { width: box.containerWidth, height: box.containerHeight },
+              wrapperSize: { width: box.wrapperWidth, height: box.wrapperHeight },
+              enabled: true
+            })
+            nextTransform = elasticResult.elasticTransform
+            wheelEndTransform = elasticResult.targetTransform
+            if (!transformsMatch(elasticResult.elasticTransform, elasticResult.targetTransform)) {
+              settleFrom = elasticResult.elasticTransform
+              setElasticActive(true)
+            } else {
+              setElasticActive(false)
+            }
+          } else {
+            setElasticActive(false)
+          }
+        } else {
+          setElasticActive(false)
+          nextTransform = projectContainTransformForElements(nextTransform, wrapper, containerRef.current)
+          wheelEndTransform = nextTransform
+        }
+      } else {
+        setElasticActive(false)
       }
 
       event.preventDefault()
       updateTransform(nextTransform, createWheelMeta(source, 'change'))
       scheduleWheelEnd(
-        nextTransform,
+        wheelEndTransform,
         source,
         isReaderMode
           ? validateReaderModeZoomDebounceMs(readerModeZoomDebounceMs)
-          : WHEEL_END_DEBOUNCE_MS
+          : WHEEL_END_DEBOUNCE_MS,
+        settleFrom
       )
     },
-    [scheduleWheelEnd]
+    [cancelSettleAnimation, scheduleWheelEnd, setElasticActive, transformsMatch]
   )
+
+  useEffect(() => {
+    const { containMode, edgeElasticScroll, enabledInteractions, isReaderMode } = args
+    const trackpadEnabled = enabledInteractions.includes(VirtualPaperInteractionMode.TrackpadScrollPan)
+
+    if (!containMode || !edgeElasticScroll || isReaderMode || !trackpadEnabled) {
+      cancelSettleAnimation()
+      if (wheelEndTimerRef.current !== null) {
+        window.clearTimeout(wheelEndTimerRef.current)
+        wheelEndTimerRef.current = null
+      }
+      wheelEndStateRef.current = null
+    }
+  }, [
+    args.containMode,
+    args.edgeElasticScroll,
+    args.enabledInteractions,
+    args.isReaderMode,
+    cancelSettleAnimation
+  ])
 
   useEffect(() => {
     const wrapper = latestArgsRef.current.wrapperRef.current
@@ -193,6 +351,7 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
         window.clearTimeout(wheelEndTimerRef.current)
         wheelEndTimerRef.current = null
       }
+      cancelSettleAnimation()
     }
-  }, [handleWheel])
+  }, [cancelSettleAnimation, handleWheel])
 }

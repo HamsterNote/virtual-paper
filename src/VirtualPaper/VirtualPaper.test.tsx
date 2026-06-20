@@ -11,6 +11,9 @@ import {
 import { useMultiDragInteractions } from './useMultiDragInteractions'
 import { useWheelInteractions } from './useWheelInteractions'
 
+// allow: SIZE_OK — Existing component regression matrix is intentionally kept together;
+// splitting the suite is a separate behavior-preserving refactor outside this test-only task.
+
 vi.mock('./useMultiDragInteractions', () => ({
   useMultiDragInteractions: vi.fn()
 }))
@@ -614,6 +617,136 @@ describe('VirtualPaper', () => {
 
     expect(getLatestMultiDragArgs().containMode).toBe(false)
     expect(getLatestWheelArgs().containMode).toBe(false)
+  })
+
+  it('passes scroll opt-in switches as false to hooks by default', () => {
+    render(
+      <VirtualPaper>
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    expect(getLatestMultiDragArgs().inertialScroll).toBe(false)
+    expect(getLatestMultiDragArgs().edgeElasticScroll).toBe(false)
+    expect(getLatestWheelArgs().inertialScroll).toBe(false)
+    expect(getLatestWheelArgs().edgeElasticScroll).toBe(false)
+  })
+
+  it('passes true scroll opt-in switches through to both hooks', () => {
+    render(
+      <VirtualPaper inertialScroll edgeElasticScroll>
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    expect(getLatestMultiDragArgs().inertialScroll).toBe(true)
+    expect(getLatestMultiDragArgs().edgeElasticScroll).toBe(true)
+    expect(getLatestWheelArgs().inertialScroll).toBe(true)
+    expect(getLatestWheelArgs().edgeElasticScroll).toBe(true)
+  })
+
+  it('renders raw contain transform only while the elastic lifecycle ref is active', () => {
+    mockVirtualPaperRectSizes({
+      wrapper: { width: 800, height: 600 },
+      container: { width: 1000, height: 900 }
+    })
+
+    render(
+      <VirtualPaper containMode edgeElasticScroll initialPlacement={VirtualPaperInitialPlacement.TopLeft}>
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
+    const elasticActiveRef = getLatestWheelArgs().elasticActiveRef
+
+    expect(getLatestMultiDragArgs().elasticActiveRef).toBe(elasticActiveRef)
+    expect(container.style.transform).toBe('translate3d(0px, 0px, 0) scale(1)')
+
+    act(() => {
+      if (elasticActiveRef) elasticActiveRef.current = true
+      getLatestWheelArgs().updateTransform(
+        { x: 999, y: -999, scale: 1 },
+        {
+          source: VirtualPaperInteractionMode.TrackpadScrollPan,
+          inputType: 'wheel',
+          phase: 'change'
+        }
+      )
+    })
+
+    expect(container.style.transform).toBe('translate3d(999px, -999px, 0) scale(1)')
+
+    act(() => {
+      if (elasticActiveRef) elasticActiveRef.current = false
+      getLatestWheelArgs().endTransform(
+        { x: 0, y: -300, scale: 1 },
+        {
+          source: VirtualPaperInteractionMode.TrackpadScrollPan,
+          inputType: 'wheel',
+          phase: 'end'
+        }
+      )
+    })
+
+    expect(container.style.transform).toBe('translate3d(0px, -300px, 0) scale(1)')
+  })
+
+  it('renders active edge-elastic overshoot instead of the default contain projection', () => {
+    mockVirtualPaperRectSizes({
+      wrapper: { width: 800, height: 600 },
+      container: { width: 1000, height: 900 }
+    })
+
+    render(
+      <VirtualPaper containMode edgeElasticScroll initialPlacement={VirtualPaperInitialPlacement.TopLeft}>
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
+    const elasticActiveRef = getLatestWheelArgs().elasticActiveRef
+
+    act(() => {
+      if (elasticActiveRef) elasticActiveRef.current = true
+      getLatestWheelArgs().updateTransform(
+        { x: 550, y: 385, scale: 1 },
+        {
+          source: VirtualPaperInteractionMode.TrackpadScrollPan,
+          inputType: 'wheel',
+          phase: 'change'
+        }
+      )
+    })
+
+    expect(container.style.transform).toBe('translate3d(550px, 385px, 0) scale(1)')
+  })
+
+  it('default edgeElasticScroll off keeps contain projection even if elastic lifecycle ref is stale', () => {
+    mockVirtualPaperRectSizes({
+      wrapper: { width: 800, height: 600 },
+      container: { width: 1000, height: 900 }
+    })
+
+    render(
+      <VirtualPaper containMode initialPlacement={VirtualPaperInitialPlacement.TopLeft}>
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
+    const elasticActiveRef = getLatestWheelArgs().elasticActiveRef
+
+    act(() => {
+      if (elasticActiveRef) elasticActiveRef.current = true
+      getLatestWheelArgs().updateTransform(
+        { x: 550, y: 385, scale: 1 },
+        {
+          source: VirtualPaperInteractionMode.TrackpadScrollPan,
+          inputType: 'wheel',
+          phase: 'change'
+        }
+      )
+    })
+
+    expect(container.style.transform).toBe('translate3d(0px, 0px, 0) scale(1)')
   })
 
   it('re-projects display transform on ResizeObserver and window resize without firing onTransformChange', () => {

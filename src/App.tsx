@@ -32,6 +32,10 @@ export default function App() {
 
   const [containMode, setContainMode] = useState(false)
 
+  const [inertialScroll, setInertialScroll] = useState(false)
+
+  const [edgeElasticScroll, setEdgeElasticScroll] = useState(false)
+
   const [controlledX, setControlledX] = useState('0')
   const [controlledY, setControlledY] = useState('0')
   const [controlledScale, setControlledScale] = useState('1')
@@ -153,6 +157,38 @@ export default function App() {
         </section>
 
         <section className="control-section">
+          <h3>Inertial Scroll</h3>
+          <label className="mode-toggle">
+            <input
+              type="checkbox"
+              data-testid="inertial-scroll-toggle"
+              checked={inertialScroll}
+              onChange={(e) => {
+                setInertialScroll(e.target.checked)
+                setRemountKey((k) => k + 1)
+              }}
+            />
+            <span>启用惯性滚动</span>
+          </label>
+        </section>
+
+        <section className="control-section">
+          <h3>Edge Elastic Scroll</h3>
+          <label className="mode-toggle">
+            <input
+              type="checkbox"
+              data-testid="edge-elastic-scroll-toggle"
+              checked={edgeElasticScroll}
+              onChange={(e) => {
+                setEdgeElasticScroll(e.target.checked)
+                setRemountKey((k) => k + 1)
+              }}
+            />
+            <span>启用边缘弹性滚动</span>
+          </label>
+        </section>
+
+        <section className="control-section">
           <h3>受控模式</h3>
           <label className="mode-toggle">
             <input
@@ -227,6 +263,8 @@ export default function App() {
           initialPlacement={initialPlacement}
           containerStyle={{ width: 600, height: 400 }}
           containMode={containMode}
+          inertialScroll={inertialScroll}
+          edgeElasticScroll={edgeElasticScroll}
           {...(isControlled ? { transform: controlledTransform } : {})}
           onTransformChange={handleTransformChange}
           {...(readerMode

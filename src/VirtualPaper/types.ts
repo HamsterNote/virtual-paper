@@ -56,6 +56,14 @@ export type VirtualPaperProps = {
    */
   containMode?: boolean
   /**
+   * 启用滚动惯性；默认 false。这里只暴露 API 开关，具体行为由交互 hook 决定。
+   */
+  inertialScroll?: boolean
+  /**
+   * 启用边缘弹性滚动；默认 false。这里只暴露 API 开关，具体行为由交互 hook 决定。
+   */
+  edgeElasticScroll?: boolean
+  /**
    * 阅读模式下的缩放防抖时间（毫秒）。
    * 默认 500ms。仅在 readerMode 为 true 时生效。
    */
@@ -104,6 +112,15 @@ export type UseVirtualPaperInteractionArgs = {
    */
   containMode?: boolean
   /**
+   * 启用滚动惯性；默认 false。
+   */
+  inertialScroll?: boolean
+  /**
+   * 启用边缘弹性滚动；默认 false。
+   */
+  edgeElasticScroll?: boolean
+  elasticActiveRef?: React.MutableRefObject<boolean>
+  /**
    * 阅读模式下的缩放防抖时间（毫秒）。
    * 默认 500ms。仅在 isReaderMode 为 true 时生效。
    */
@@ -116,3 +133,5 @@ export const DEFAULT_ENABLED_INTERACTIONS = [
   VirtualPaperInteractionMode.TouchSingleFingerPan,
   VirtualPaperInteractionMode.TouchTwoFingerZoom
 ]
+
+export const READER_MODE_NATIVE_TOUCH_ACTION = 'pan-x pan-y'

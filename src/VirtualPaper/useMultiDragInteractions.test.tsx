@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { StrictMode, useRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useMultiDragInteractions } from './useMultiDragInteractions'
@@ -55,6 +55,10 @@ const multiDragMock = vi.hoisted(() => {
     mixinTypes: string[],
     singleFingerMixinTypes?: string[]
   ) {
+    // Mirror @system-ui-js/multi-drag DragBase: it mutates the bound element
+    // to touch-action:none on construction, which readerMode must undo.
+    element.style.touchAction = 'none'
+
     const instance = {
       element,
       options,
@@ -99,6 +103,8 @@ const multiDragMock = vi.hoisted(() => {
       Start: 'start',
       Move: 'move',
       End: 'end',
+      Inertial: 'inertial',
+      InertialEnd: 'inertialEnd',
       AllEnd: 'allEnd'
     }
   }
@@ -125,10 +131,14 @@ function TestHarness({
   containMode = false,
   contentSize,
   isReaderMode = false,
+  inertialScroll = false,
+  edgeElasticScroll = false,
+  elasticActiveRef,
   readerModeZoomDebounceMs
 }: HarnessProps) {
   const wrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const localElasticActiveRef = useRef(false)
 
   useMultiDragInteractions({
     wrapperRef,
@@ -142,6 +152,9 @@ function TestHarness({
     endTransform,
     containMode,
     isReaderMode,
+    inertialScroll,
+    edgeElasticScroll,
+    elasticActiveRef: elasticActiveRef ?? localElasticActiveRef,
     readerModeZoomDebounceMs
   })
 
@@ -232,9 +245,29 @@ describe('useMultiDragInteractions', () => {
 
   afterEach(() => {
     cleanup()
+    vi.unstubAllGlobals()
     vi.useRealTimers()
     Element.prototype.getBoundingClientRect = originalGetBoundingClientRect
   })
+
+  const installPausedAnimationFrame = () => {
+    const callbacks = new Map<number, FrameRequestCallback>()
+    let nextFrameId = 1
+    const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId
+      nextFrameId += 1
+      callbacks.set(frameId, callback)
+      return frameId
+    })
+    const cancelAnimationFrame = vi.fn((frameId: number) => {
+      callbacks.delete(frameId)
+    })
+
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrame)
+    vi.stubGlobal('cancelAnimationFrame', cancelAnimationFrame)
+
+    return { requestAnimationFrame, cancelAnimationFrame, callbacks }
+  }
 
   // ─────────────────────────────────────────────────────────────────────
   // 用户报告：鼠标可以在 wrapper 触发，但 Touch（pointer）只能在 container 触发。
@@ -353,6 +386,265 @@ describe('useMultiDragInteractions', () => {
     expect(container.style.top).toBe('')
   })
 
+  it('sets multi-drag inertial option from inertialScroll', () => {
+    const { rerender } = render(<TestHarness inertialScroll />)
+    expect(getLastInstance().options.inertial).toBe(true)
+
+    rerender(<TestHarness inertialScroll={false} />)
+    expect(getLastInstance().options.inertial).toBe(false)
+  })
+
+  it('keeps the last pan source through AllEnd so inertial frames update as change phase', () => {
+    const updateTransform = vi.fn()
+    const endTransform = vi.fn()
+    render(
+      <TestHarness
+        inertialScroll
+        transform={{ x: 10, y: 20, scale: 1 }}
+        enabledInteractions={[VirtualPaperInteractionMode.MouseDragPan]}
+        updateTransform={updateTransform}
+        endTransform={endTransform}
+      />
+    )
+
+    const instance = getLastInstance()
+    const container = screen.getByTestId('container')
+
+    instance.trigger('start', [makeFinger('mouse')])
+    instance.trigger('allEnd', [])
+    instance.options.setPose?.(container, {
+      position: { x: 35, y: 45 },
+      scale: 1
+    })
+    instance.trigger('inertial', [])
+
+    expect(updateTransform).toHaveBeenCalledTimes(1)
+    expect(updateTransform).toHaveBeenCalledWith(
+      { x: 35, y: 45, scale: 1 },
+      {
+        source: VirtualPaperInteractionMode.MouseDragPan,
+        inputType: 'pointer',
+        phase: 'change'
+      }
+    )
+    expect(endTransform).not.toHaveBeenCalled()
+  })
+
+  it('finalizes inertial end once with end phase', () => {
+    const updateTransform = vi.fn()
+    const endTransform = vi.fn()
+    render(
+      <TestHarness
+        inertialScroll
+        transform={{ x: 10, y: 20, scale: 1 }}
+        enabledInteractions={[VirtualPaperInteractionMode.MouseDragPan]}
+        updateTransform={updateTransform}
+        endTransform={endTransform}
+      />
+    )
+
+    const instance = getLastInstance()
+    const container = screen.getByTestId('container')
+
+    instance.trigger('start', [makeFinger('mouse')])
+    instance.trigger('allEnd', [])
+    instance.options.setPose?.(container, {
+      position: { x: 35, y: 45 },
+      scale: 1
+    })
+    instance.trigger('inertial', [])
+    instance.trigger('inertialEnd', [])
+
+    expect(endTransform).toHaveBeenCalledTimes(1)
+    expect(endTransform).toHaveBeenCalledWith(
+      { x: 10, y: 20, scale: 1 },
+      {
+        source: VirtualPaperInteractionMode.MouseDragPan,
+        inputType: 'pointer',
+        phase: 'end'
+      }
+    )
+  })
+
+  it('does not apply inertial orphan pan deltas after a two-finger pinch ends', () => {
+    const updateTransform = vi.fn()
+    const endTransform = vi.fn()
+    render(
+      <TestHarness
+        inertialScroll
+        transform={{ x: 0, y: 0, scale: 1 }}
+        enabledInteractions={[
+          VirtualPaperInteractionMode.TouchSingleFingerPan,
+          VirtualPaperInteractionMode.TouchTwoFingerZoom
+        ]}
+        updateTransform={updateTransform}
+        endTransform={endTransform}
+      />
+    )
+
+    const instance = getLastInstance()
+    const container = screen.getByTestId('container')
+    const fingerA = makeFingerWithPoint('touch', true, { x: 100, y: 100 })
+    const fingerB = makeFingerWithPoint('touch', false, { x: 300, y: 100 })
+
+    // Given: a pinch used anchor zoom, so controller pose.position is an orphan pan delta.
+    instance.trigger('start', [fingerA, fingerB])
+    instance.options.setPose?.(container, { scale: 2 })
+    expect(updateTransform).toHaveBeenCalledTimes(1)
+
+    // When: multi-drag fires AllEnd before subsequent inertial setPose frames.
+    updateTransform.mockClear()
+    instance.trigger('allEnd', [])
+    instance.options.setPose?.(container, {
+      scale: 2,
+      position: { x: 80, y: 40 }
+    })
+    instance.trigger('inertial', [])
+    instance.trigger('inertialEnd', [])
+
+    // Then: the inertial change frame is blocked, and finalization freezes the current transform.
+    expect(updateTransform).not.toHaveBeenCalled()
+    expect(endTransform).toHaveBeenCalledTimes(1)
+    expect(endTransform).toHaveBeenCalledWith(
+      { x: 0, y: 0, scale: 1 },
+      {
+        source: VirtualPaperInteractionMode.TouchTwoFingerZoom,
+        inputType: 'pointer',
+        phase: 'end'
+      }
+    )
+  })
+
+  it('blocks inertial single-finger pan after a multi→single transition and still finalizes', () => {
+    const updateTransform = vi.fn()
+    const endTransform = vi.fn()
+    render(
+      <TestHarness
+        inertialScroll
+        transform={{ x: 0, y: 0, scale: 1 }}
+        enabledInteractions={[
+          VirtualPaperInteractionMode.TouchSingleFingerPan,
+          VirtualPaperInteractionMode.TouchTwoFingerZoom
+        ]}
+        updateTransform={updateTransform}
+        endTransform={endTransform}
+      />
+    )
+
+    const instance = getLastInstance()
+    const container = screen.getByTestId('container')
+    const fingerA = makeFingerWithPoint('touch', true, { x: 100, y: 100 })
+    const fingerB = makeFingerWithPoint('touch', false, { x: 300, y: 100 })
+
+    // Given: a two-finger pinch transitions to a single remaining touch.
+    instance.trigger('start', [fingerA, fingerB])
+    instance.options.setPose?.(container, { scale: 2 })
+    instance.fingers = [fingerB]
+    instance.options.setPoseOnEnd?.(container, { scale: 2, position: { x: 50, y: 30 } })
+    instance.trigger('end', [fingerB])
+
+    // When: AllEnd preserves state for inertia, then the library emits a single-finger inertial pan.
+    updateTransform.mockClear()
+    endTransform.mockClear()
+    instance.trigger('allEnd', [])
+    instance.options.setPose?.(container, {
+      scale: 2,
+      position: { x: 90, y: 45 }
+    })
+    instance.trigger('inertial', [])
+    instance.trigger('inertialEnd', [])
+
+    // Then: blocked change frames never update, but InertialEnd still completes the gesture.
+    expect(updateTransform).not.toHaveBeenCalled()
+    expect(endTransform).toHaveBeenCalledTimes(1)
+    expect(endTransform).toHaveBeenCalledWith(
+      { x: 0, y: 0, scale: 1 },
+      {
+        source: VirtualPaperInteractionMode.TouchSingleFingerPan,
+        inputType: 'pointer',
+        phase: 'end'
+      }
+    )
+  })
+
+  it('uses edge-elastic contain projection for inertial pan frames', () => {
+    const updateTransform = vi.fn()
+    const elasticActiveRef = { current: false }
+    render(
+      <TestHarness
+        inertialScroll
+        transform={{ x: 0, y: 0, scale: 1 }}
+        enabledInteractions={[VirtualPaperInteractionMode.MouseDragPan]}
+        updateTransform={updateTransform}
+        containMode
+        edgeElasticScroll
+        elasticActiveRef={elasticActiveRef}
+      />
+    )
+
+    const wrapper = screen.getByTestId('wrapper')
+    const container = screen.getByTestId('container')
+    setupContainMocks(wrapper, container, {
+      wrapperWidth: 500,
+      wrapperHeight: 400,
+      containerWidth: 600,
+      containerHeight: 500
+    })
+
+    // Given: mouse pan source survives AllEnd because inertia is enabled.
+    const instance = getLastInstance()
+    instance.trigger('start', [makeFinger('mouse')])
+    instance.trigger('allEnd', [])
+
+    // When: an inertial frame overscrolls the contain bounds.
+    instance.options.setPose?.(container, {
+      position: { x: 110, y: 80 },
+      scale: 1
+    })
+    instance.trigger('inertial', [])
+
+    // Then: the normal applyPose path emits resisted elastic projection, not hard clamp.
+    expect(updateTransform).toHaveBeenCalledWith(
+      { x: 60.50000000000001, y: 44, scale: 1 },
+      {
+        source: VirtualPaperInteractionMode.MouseDragPan,
+        inputType: 'pointer',
+        phase: 'change'
+      }
+    )
+    expect(elasticActiveRef.current).toBe(true)
+  })
+
+  it('does not react to mocked inertial events when inertialScroll is false', () => {
+    const updateTransform = vi.fn()
+    const endTransform = vi.fn()
+    render(
+      <TestHarness
+        inertialScroll={false}
+        transform={{ x: 10, y: 20, scale: 1 }}
+        enabledInteractions={[VirtualPaperInteractionMode.MouseDragPan]}
+        updateTransform={updateTransform}
+        endTransform={endTransform}
+      />
+    )
+
+    const instance = getLastInstance()
+    const container = screen.getByTestId('container')
+
+    expect(instance.options.inertial).toBe(false)
+    instance.trigger('start', [makeFinger('mouse')])
+    instance.trigger('allEnd', [])
+    instance.options.setPose?.(container, {
+      position: { x: 35, y: 45 },
+      scale: 1
+    })
+    instance.trigger('inertial', [])
+    instance.trigger('inertialEnd', [])
+
+    expect(updateTransform).not.toHaveBeenCalled()
+    expect(endTransform).not.toHaveBeenCalled()
+  })
+
   it('only instantiates Mixin when pointer modes are enabled', () => {
     const { rerender } = render(
       <TestHarness
@@ -382,6 +674,19 @@ describe('useMultiDragInteractions', () => {
 
     expect(getLastInstance().mixinTypes).toEqual(['drag', 'scale'])
     expect(getLastInstance().singleFingerMixinTypes).toEqual([])
+  })
+
+  it('restores wrapper native touch pan after multi-drag mutates touch-action in readerMode', () => {
+    render(
+      <TestHarness
+        enabledInteractions={[VirtualPaperInteractionMode.TouchSingleFingerPan]}
+        isReaderMode
+      />
+    )
+
+    const wrapper = screen.getByTestId('wrapper')
+    expect(getLastInstance().element).toBe(wrapper)
+    expect(wrapper.style.touchAction).toBe('pan-x pan-y')
   })
 
   it('anchors two-finger pinch at the finger midpoint so content follows the fingers', () => {
@@ -732,6 +1037,144 @@ describe('useMultiDragInteractions', () => {
       { x: 0, y: 0, scale: 1 },
       expect.objectContaining({ phase: 'change' })
     )
+  })
+
+  it('uses resisted overscroll during edge-elastic mouse drag and settles to the legal contain target', () => {
+    vi.useFakeTimers()
+    const updateTransform = vi.fn()
+    const endTransform = vi.fn()
+    const elasticActiveRef = { current: false }
+    render(
+      <TestHarness
+        transform={{ x: 0, y: 0, scale: 1 }}
+        enabledInteractions={[VirtualPaperInteractionMode.MouseDragPan]}
+        updateTransform={updateTransform}
+        endTransform={endTransform}
+        containMode
+        edgeElasticScroll
+        elasticActiveRef={elasticActiveRef}
+      />
+    )
+
+    const wrapper = screen.getByTestId('wrapper')
+    const container = screen.getByTestId('container')
+    setupContainMocks(wrapper, container, {
+      wrapperWidth: 500,
+      wrapperHeight: 400,
+      containerWidth: 600,
+      containerHeight: 500
+    })
+
+    const instance = getLastInstance()
+    instance.trigger('start', [makeFinger('mouse')])
+    instance.options.setPose?.(container, {
+      position: { x: 110, y: 80 },
+      scale: 1
+    })
+
+    expect(updateTransform).toHaveBeenCalledWith(
+      { x: 60.50000000000001, y: 44, scale: 1 },
+      expect.objectContaining({ phase: 'change' })
+    )
+    expect(elasticActiveRef.current).toBe(true)
+
+    instance.options.setPoseOnEnd?.(container, {
+      position: { x: 110, y: 80 },
+      scale: 1
+    })
+    expect(endTransform).not.toHaveBeenCalled()
+
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+
+    expect(endTransform).toHaveBeenCalledWith(
+      { x: 0, y: 0, scale: 1 },
+      expect.objectContaining({ phase: 'end' })
+    )
+    expect(elasticActiveRef.current).toBe(false)
+  })
+
+  it('cancels a pending edge-elastic settle when a new pointer gesture starts', () => {
+    vi.useFakeTimers()
+    const endTransform = vi.fn()
+    const elasticActiveRef = { current: false }
+    render(
+      <TestHarness
+        transform={{ x: 0, y: 0, scale: 1 }}
+        enabledInteractions={[VirtualPaperInteractionMode.MouseDragPan]}
+        endTransform={endTransform}
+        containMode
+        edgeElasticScroll
+        elasticActiveRef={elasticActiveRef}
+      />
+    )
+
+    const wrapper = screen.getByTestId('wrapper')
+    const container = screen.getByTestId('container')
+    setupContainMocks(wrapper, container, {
+      wrapperWidth: 500,
+      wrapperHeight: 400,
+      containerWidth: 600,
+      containerHeight: 500
+    })
+
+    const instance = getLastInstance()
+    instance.trigger('start', [makeFinger('mouse')])
+    instance.options.setPoseOnEnd?.(container, {
+      position: { x: 110, y: 80 },
+      scale: 1
+    })
+    expect(elasticActiveRef.current).toBe(true)
+
+    instance.trigger('start', [makeFinger('mouse')])
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+
+    expect(endTransform).not.toHaveBeenCalled()
+    expect(elasticActiveRef.current).toBe(false)
+  })
+
+  it('cancels a pending edge-elastic settle when containMode turns off', () => {
+    const { requestAnimationFrame, cancelAnimationFrame } = installPausedAnimationFrame()
+    const endTransform = vi.fn()
+    const elasticActiveRef = { current: false }
+    const harnessProps = {
+      transform: { x: 0, y: 0, scale: 1 },
+      enabledInteractions: [VirtualPaperInteractionMode.MouseDragPan],
+      endTransform,
+      edgeElasticScroll: true,
+      elasticActiveRef
+    }
+    const { rerender } = render(<TestHarness {...harnessProps} containMode />)
+
+    const wrapper = screen.getByTestId('wrapper')
+    const container = screen.getByTestId('container')
+    setupContainMocks(wrapper, container, {
+      wrapperWidth: 500,
+      wrapperHeight: 400,
+      containerWidth: 600,
+      containerHeight: 500
+    })
+
+    // Given: an end-phase overscroll has started a paused settle animation.
+    const instance = getLastInstance()
+    instance.trigger('start', [makeFinger('mouse')])
+    instance.options.setPoseOnEnd?.(container, {
+      position: { x: 110, y: 80 },
+      scale: 1
+    })
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1)
+    expect(elasticActiveRef.current).toBe(true)
+
+    // When: containMode is toggled off while that settle is still pending.
+    rerender(<TestHarness {...harnessProps} containMode={false} />)
+
+    // Then: the pending RAF is cancelled and the component handoff flag is cleared.
+    expect(cancelAnimationFrame).toHaveBeenCalledTimes(1)
+    expect(endTransform).not.toHaveBeenCalled()
+    expect(elasticActiveRef.current).toBe(false)
   })
 
   // ─────────────────────────────────────────────────────────────────────

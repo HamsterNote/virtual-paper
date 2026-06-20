@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import {
   DragOperationType,
   Mixin,
@@ -8,15 +8,18 @@ import {
   type Pose
 } from '@system-ui-js/multi-drag'
 import {
+  applyElasticContainResistance,
   clampReaderTransform,
   clampScale,
   validateReaderModeZoomDebounceMs
 } from './transform'
-import { projectContainTransformForElements } from './containMode'
+import { measureContainBox, projectContainTransformForElements } from './containMode'
+import { createElasticSettleController } from './elasticSettle'
 import {
   type UseVirtualPaperInteractionArgs,
   type VirtualPaperInteractionMode as VirtualPaperInteractionModeType,
   type VirtualPaperTransform,
+  READER_MODE_NATIVE_TOUCH_ACTION,
   VirtualPaperInteractionMode
 } from './types'
 
@@ -194,6 +197,9 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
     endTransform,
     isReaderMode,
     containMode,
+    inertialScroll = false,
+    edgeElasticScroll = false,
+    elasticActiveRef,
     readerModeZoomDebounceMs
   } = args
 
@@ -205,8 +211,11 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
   const endTransformRef = useRef(endTransform)
   const isReaderModeRef = useRef(isReaderMode)
   const containModeRef = useRef(containMode)
+  const edgeElasticScrollRef = useRef(edgeElasticScroll)
+  const elasticActiveRefRef = useRef(elasticActiveRef)
   const readerModeZoomDebounceMsRef = useRef(readerModeZoomDebounceMs)
   const readerZoomEndTimerRef = useRef<number | null>(null)
+  const settleCancelRef = useRef<(() => void) | null>(null)
   const activeGestureRef = useRef<ActivePointerGesture | null>(null)
   const zoomSegmentRef = useRef<{
     startTransform: VirtualPaperTransform
@@ -231,15 +240,35 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
   endTransformRef.current = endTransform
   isReaderModeRef.current = isReaderMode
   containModeRef.current = containMode
+  edgeElasticScrollRef.current = edgeElasticScroll
+  elasticActiveRefRef.current = elasticActiveRef
   readerModeZoomDebounceMsRef.current = readerModeZoomDebounceMs
 
   const flags = getPointerModeFlags(enabledInteractions)
+  const {
+    setElasticActive,
+    cancelSettleAnimation,
+    transformsMatch,
+    settleElasticTransform
+  } = useMemo(() => createElasticSettleController({
+    elasticActiveRefRef,
+    settleCancelRef,
+    updateTransformRef,
+    endTransformRef
+  }), [])
+
+  useEffect(() => {
+    if (!containMode || !edgeElasticScroll || isReaderMode) {
+      cancelSettleAnimation()
+    }
+  }, [containMode, edgeElasticScroll, isReaderMode, cancelSettleAnimation])
 
   useEffect(() => {
     const element = wrapperRef.current
     if (!element || !hasPointerModes(flags)) return
 
     let mixin: Mixin | null = null
+    const touchActionBeforeMixin = element.style.touchAction
 
     const cancelReaderZoomEnd = () => {
       if (readerZoomEndTimerRef.current !== null) {
@@ -309,21 +338,33 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
         return
       }
 
+      const segment = zoomSegmentRef.current
+      const currentMid = computeWrapperLocalMidpoint(
+        mixin?.getFingers() ?? [],
+        wrapperRef.current
+      )
+
       // 预防式屏蔽：multi→single 转换后，剩下那根手指的所有后续 pan 更新都直接丢弃。
       // 这覆盖了 didScaleDuringGestureRef freeze 漏掉的 phase==='change' 场景
       // （即"抬起一指后剩下手指继续 move"时的位移叠加跳变）。
+      // phase==='end' 仍需继续走 applyPose 收尾，确保 InertialEnd/TouchEnd 能完成回调语义。
       if (
+        phase === 'change' &&
         source === VirtualPaperInteractionMode.TouchSingleFingerPan &&
         singlePanBlockedAfterMultiRef.current
       ) {
         return
       }
 
-      const segment = zoomSegmentRef.current
-      const currentMid = computeWrapperLocalMidpoint(
-        mixin?.getFingers() ?? [],
-        wrapperRef.current
-      )
+      if (
+        phase === 'change' &&
+        source === VirtualPaperInteractionMode.TouchTwoFingerZoom &&
+        didScaleDuringGestureRef.current &&
+        currentMid === null
+      ) {
+        return
+      }
+
       const isAnchorZoom =
         source === VirtualPaperInteractionMode.TouchTwoFingerZoom &&
         segment !== null &&
@@ -367,12 +408,37 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
       }
 
       // contain 约束：非阅读模式下，将变换投影到 wrapper 内不露空白的合法范围
+      let elasticTargetTransform: VirtualPaperTransform | null = null
       if (containModeRef.current && !isReaderModeRef.current && wrapperRef.current && containerRef.current) {
-        nextTransform = projectContainTransformForElements(
-          nextTransform,
-          wrapperRef.current,
-          containerRef.current
-        )
+        if (edgeElasticScrollRef.current) {
+          const box = measureContainBox(
+            wrapperRef.current,
+            containerRef.current,
+            nextTransform.scale
+          )
+          if (box) {
+            const elasticResult = applyElasticContainResistance({
+              transform: nextTransform,
+              containerSize: { width: box.containerWidth, height: box.containerHeight },
+              wrapperSize: { width: box.wrapperWidth, height: box.wrapperHeight },
+              enabled: true
+            })
+            elasticTargetTransform = elasticResult.targetTransform
+            nextTransform = elasticResult.elasticTransform
+            setElasticActive(!transformsMatch(elasticResult.elasticTransform, elasticResult.targetTransform))
+          } else {
+            setElasticActive(false)
+          }
+        } else {
+          setElasticActive(false)
+          nextTransform = projectContainTransformForElements(
+            nextTransform,
+            wrapperRef.current,
+            containerRef.current
+          )
+        }
+      } else {
+        setElasticActive(false)
       }
 
       const meta = {
@@ -382,18 +448,32 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
       }
 
       if (phase === 'end') {
+        const endMeta = {
+          source,
+          inputType: 'pointer' as const,
+          phase: 'end' as const
+        }
         if (
           isReaderModeRef.current &&
           source === VirtualPaperInteractionMode.TouchTwoFingerZoom
         ) {
-          scheduleReaderZoomEnd(nextTransform, { ...meta, phase: 'end' })
+          scheduleReaderZoomEnd(nextTransform, endMeta)
           return
         }
 
-        endTransformRef.current(nextTransform, meta)
+        if (elasticTargetTransform && !transformsMatch(nextTransform, elasticTargetTransform)) {
+          settleElasticTransform(nextTransform, elasticTargetTransform, endMeta)
+          return
+        }
+
+        setElasticActive(false)
+        endTransformRef.current(elasticTargetTransform ?? nextTransform, endMeta)
         return
       }
 
+      if (!elasticTargetTransform || transformsMatch(nextTransform, elasticTargetTransform)) {
+        setElasticActive(false)
+      }
       updateTransformRef.current(nextTransform, meta)
     }
 
@@ -402,7 +482,7 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
       setPose: (target, pose) => applyPose(target, pose, 'change'),
       setPoseOnEnd: (target, pose) => applyPose(target, pose, 'end'),
       maxFingerCount: -1,
-      inertial: false,
+      inertial: inertialScroll,
       passive: false
     }
 
@@ -442,12 +522,28 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
         startMid: mid
       }
     }
-    const clearGesture = () => {
+    const clearGestureState = () => {
       activeGestureRef.current = null
       zoomSegmentRef.current = null
       didScaleDuringGestureRef.current = false
       singlePanBlockedAfterMultiRef.current = false
+    }
+    const clearGesture = () => {
+      clearGestureState()
       cancelReaderZoomEnd()
+    }
+    const clearGestureAfterAllEnd = () => {
+      if (inertialScroll) {
+        // 惯性帧由 multi-drag 在 AllEnd 之后继续调用 options.setPose。
+        // 因此必须保留最后一次手势 source 和缩放保护状态，直到 InertialEnd 收尾。
+        return
+      }
+
+      clearGesture()
+    }
+    const finishInertialGesture = () => {
+      applyPose(element, getPose(element), 'end')
+      clearGestureState()
     }
 
     mixin = new Mixin(
@@ -457,7 +553,14 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
       getSingleFingerMixinTypes(flags)
     )
 
+    if (isReaderMode) {
+      element.style.touchAction = touchActionBeforeMixin && touchActionBeforeMixin !== 'none'
+        ? touchActionBeforeMixin
+        : READER_MODE_NATIVE_TOUCH_ACTION
+    }
+
     mixin.addEventListener(DragOperationType.Start, (fingers) => {
+      cancelSettleAnimation()
       didScaleDuringGestureRef.current = false
       trackGesture(fingers)
       captureZoomSegment(fingers)
@@ -467,23 +570,37 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
       trackGesture(fingers)
       captureZoomSegment(fingers)
     })
-    mixin.addEventListener(DragOperationType.AllEnd, clearGesture)
+    if (inertialScroll) {
+      mixin.addEventListener(DragOperationType.InertialEnd, finishInertialGesture)
+    }
+    mixin.addEventListener(DragOperationType.AllEnd, clearGestureAfterAllEnd)
 
     return () => {
       activeGestureRef.current = null
       zoomSegmentRef.current = null
       didScaleDuringGestureRef.current = false
       singlePanBlockedAfterMultiRef.current = false
+      cancelSettleAnimation()
       cancelReaderZoomEnd()
       mixin?.destroy()
+      if (isReaderMode) {
+        element.style.touchAction = touchActionBeforeMixin
+      }
     }
   }, [
     containerRef,
     wrapperRef,
+    isReaderMode,
     flags.mouseDragPan,
     flags.touchSingleFingerPan,
     flags.touchTwoFingerPan,
     flags.touchTwoFingerZoom,
-    flags.penPan
+    flags.penPan,
+    inertialScroll,
+    edgeElasticScroll,
+    setElasticActive,
+    cancelSettleAnimation,
+    transformsMatch,
+    settleElasticTransform
   ])
 }
