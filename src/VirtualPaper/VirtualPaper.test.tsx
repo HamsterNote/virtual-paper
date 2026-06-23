@@ -252,7 +252,27 @@ describe('VirtualPaper', () => {
     expect(container.style.position).toBe('absolute')
     expect(container.style.willChange).toBe('transform')
     expect(container.style.touchAction).toBe('none')
+    expect(container.style.userSelect).toBe('text')
+  })
+
+  it('disables userSelect on container when MouseDragPan is enabled', () => {
+    render(
+      <VirtualPaper enabledInteractions={[VirtualPaperInteractionMode.MouseDragPan]}>
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
     expect(container.style.userSelect).toBe('none')
+  })
+
+  it('enables text selection on container when MouseDragPan is not enabled', () => {
+    render(
+      <VirtualPaper enabledInteractions={[VirtualPaperInteractionMode.TouchSingleFingerPan]}>
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
+    expect(container.style.userSelect).toBe('text')
   })
 
   it('calls onTransformChange in uncontrolled mode on initial placement', () => {

@@ -217,6 +217,13 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
   const readerZoomEndTimerRef = useRef<number | null>(null)
   const settleCancelRef = useRef<(() => void) | null>(null)
   const activeGestureRef = useRef<ActivePointerGesture | null>(null)
+  // 保留最后一次非 null 的手势描述。
+  // multi-drag 库的 finishPointer 流程中，finger.record(End) → finger.destroy()
+  // → onDestroy → trigger(AllEnd) 会先于 setPose(End) → applyPose('end') 执行。
+  // AllEnd 事件处理器会清空 activeGestureRef.current，导致 applyPose('end') 时
+  // chooseGestureSource 返回 null 而提前退出——边缘弹性 settle 因此被跳过。
+  // 此 ref 作为 fallback，在 phase==='end' 且 source 为 null 时提供最后一次有效的手势。
+  const lastActiveGestureRef = useRef<ActivePointerGesture | null>(null)
   const zoomSegmentRef = useRef<{
     startTransform: VirtualPaperTransform
     startMid: { x: number; y: number }
@@ -326,11 +333,23 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
         minScaleRef.current,
         maxScaleRef.current
       )
-      const source = chooseGestureSource(
+      let source = chooseGestureSource(
         activeGestureRef.current,
         currentPose.scale ?? currentTransform.scale,
         nextScale
       )
+
+      // 库竞态 fallback：multi-drag 的 finishPointer 流程中，finger.destroy() →
+      // trigger(AllEnd) 会先于 setPose(End) 执行，导致 activeGestureRef 已被
+      // clearGestureState() 清空。end 阶段需要用 lastActiveGestureRef 兜底，
+      // 否则边缘弹性 settle（snap-back）会被跳过。
+      if (!source && phase === 'end' && lastActiveGestureRef.current) {
+        source = chooseGestureSource(
+          lastActiveGestureRef.current,
+          currentPose.scale ?? currentTransform.scale,
+          nextScale
+        )
+      }
 
       if (!source) return
 
@@ -506,6 +525,13 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
       }
 
       activeGestureRef.current = nextGesture
+
+      // 库竞态保活：仅在手势仍有效时更新 lastActiveGestureRef。
+      // AllEnd 会清空 activeGestureRef 但不会清空这里——这样 applyPose('end')
+      // 在 AllEnd 之后被 setPose(End) 调用时仍能拿到最近一次有效手势。
+      if (nextGesture) {
+        lastActiveGestureRef.current = nextGesture
+      }
     }
     const captureZoomSegment = (fingers: Finger[]) => {
       if (!activeGestureRef.current?.zoomSource) {
@@ -553,6 +579,21 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
       getSingleFingerMixinTypes(flags)
     )
 
+    // 当 MouseDragPan 未启用时，在 container 上拦截鼠标 pointerdown 的冒泡，
+    // 阻止 Mixin 为鼠标创建 Finger。这样：
+    // 1. 鼠标 text-selection 不会被 Mixin 的 pointermove 跟踪干扰（消除闪烁）
+    // 2. 原生文字选择从点击位置开始而非从首字开始（消除选择锚点错乱）
+    // Touch 和 Pen 事件不受影响，仍正常冒泡到 wrapper 上的 Mixin。
+    const containerEl = containerRef.current
+    const blockMousePointerDown = (event: PointerEvent) => {
+      if (event.pointerType === 'mouse') {
+        event.stopPropagation()
+      }
+    }
+    if (!flags.mouseDragPan && containerEl) {
+      containerEl.addEventListener('pointerdown', blockMousePointerDown)
+    }
+
     if (isReaderMode) {
       element.style.touchAction = touchActionBeforeMixin && touchActionBeforeMixin !== 'none'
         ? touchActionBeforeMixin
@@ -562,6 +603,8 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
     mixin.addEventListener(DragOperationType.Start, (fingers) => {
       cancelSettleAnimation()
       didScaleDuringGestureRef.current = false
+      // 新手势开始：丢弃上一轮的 fallback 手势，避免跨手势误用。
+      lastActiveGestureRef.current = null
       trackGesture(fingers)
       captureZoomSegment(fingers)
     })
@@ -577,12 +620,16 @@ export function useMultiDragInteractions(args: UseVirtualPaperInteractionArgs): 
 
     return () => {
       activeGestureRef.current = null
+      lastActiveGestureRef.current = null
       zoomSegmentRef.current = null
       didScaleDuringGestureRef.current = false
       singlePanBlockedAfterMultiRef.current = false
       cancelSettleAnimation()
       cancelReaderZoomEnd()
       mixin?.destroy()
+      if (containerEl && !flags.mouseDragPan) {
+        containerEl.removeEventListener('pointerdown', blockMousePointerDown)
+      }
       if (isReaderMode) {
         element.style.touchAction = touchActionBeforeMixin
       }

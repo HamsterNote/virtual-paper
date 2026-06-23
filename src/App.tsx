@@ -278,24 +278,52 @@ export default function App() {
           <div
             style={{
               width: '100%',
-              height: '100%',
+              minHeight: '100%',
               background: '#f0f0f0',
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: 10,
-              padding: 20
+              padding: 24,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16
             }}
           >
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div
-                key={i}
-                style={{
-                  background: '#3498db',
-                  borderRadius: 8,
-                  height: 80
-                }}
-              />
-            ))}
+            <h2 style={{ margin: 0, color: '#2c3e50', fontSize: 22 }}>
+              VirtualPaper Demo
+            </h2>
+            <p style={{ margin: 0, lineHeight: 1.7, color: '#34495e', fontSize: 15 }}>
+              这是一段示例文字。当左侧控制面板中的 MouseDragPan 未勾选时，你可以用鼠标自由选中、复制这段文字。
+              文字选择不会触发画布拖拽，选择范围从你点击的位置开始，而非从首个字符开始。
+            </p>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: 10
+              }}
+            >
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    background: '#3498db',
+                    borderRadius: 8,
+                    height: 80,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#fff',
+                    fontWeight: 700,
+                    fontSize: 14
+                  }}
+                >
+                  Card {i}
+                </div>
+              ))}
+            </div>
+            <p style={{ margin: 0, lineHeight: 1.7, color: '#34495e', fontSize: 15 }}>
+              另一段示例文字：支持 Ctrl+滚轮缩放、触控板滚动等交互。勾选 MouseDragPan 后，
+              鼠标拖拽将用于平移画布，此时文字不可选中；取消勾选则恢复文字选择能力。
+              你也可以尝试缩放后选中不同大小的文字。
+            </p>
           </div>
         </VirtualPaper>
       </main>

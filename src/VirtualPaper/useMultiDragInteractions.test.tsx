@@ -1329,4 +1329,144 @@ describe('useMultiDragInteractions', () => {
     instance.options.setPose?.(container, { scale: 2, position: { x: 80, y: 40 } })
     expect(updateTransform).not.toHaveBeenCalled()
   })
+
+  // ─────────────────────────────────────────────────────────────────────
+  // BUG 回归：边缘弹性滚动松开后不回弹。
+  // 根因：@system-ui-js/multi-drag 的 DragBase.finishPointer() 中，
+  //   finger.record(End) → finger.destroy() → onDestroy → fingers.delete()
+  //   → fingers.size===0 → trigger(AllEnd)
+  // 会先于 setPose(End) → setPoseOnEnd 执行。
+  // 我们的 AllEnd 监听器会清空 activeGestureRef.current，
+  // 导致随后的 applyPose('end') 在 chooseGestureSource 时拿到 null 而提前退出，
+  // 边缘弹性 settle（snap-back）因此被跳过。
+  // 修复：用 lastActiveGestureRef 作为 end 阶段的 fallback source。
+  // ─────────────────────────────────────────────────────────────────────
+  it('edge-elastic settle fires when AllEnd clears active gesture before setPoseOnEnd (library race)', () => {
+    vi.useFakeTimers()
+    const updateTransform = vi.fn()
+    const endTransform = vi.fn()
+    const elasticActiveRef = { current: false }
+    render(
+      <TestHarness
+        transform={{ x: 0, y: 0, scale: 1 }}
+        enabledInteractions={[VirtualPaperInteractionMode.MouseDragPan]}
+        updateTransform={updateTransform}
+        endTransform={endTransform}
+        containMode
+        edgeElasticScroll
+        elasticActiveRef={elasticActiveRef}
+      />
+    )
+
+    const wrapper = screen.getByTestId('wrapper')
+    const container = screen.getByTestId('container')
+    setupContainMocks(wrapper, container, {
+      wrapperWidth: 500,
+      wrapperHeight: 400,
+      containerWidth: 600,
+      containerHeight: 500
+    })
+
+    const instance = getLastInstance()
+
+    // 1. pointer down — Start 事件触发 trackGesture，建立 active + lastActive 手势
+    instance.trigger('start', [makeFinger('mouse')])
+
+    // 2. drag move 到 delta (110, 80) — 拉出效果，应用弹性阻力
+    instance.options.setPose?.(container, {
+      position: { x: 110, y: 80 },
+      scale: 1
+    })
+    expect(updateTransform).toHaveBeenCalledWith(
+      { x: 60.50000000000001, y: 44, scale: 1 },
+      expect.objectContaining({ phase: 'change' })
+    )
+    expect(elasticActiveRef.current).toBe(true)
+
+    // 3. 模拟 multi-drag 库 finishPointer 的真实事件顺序：
+    //    AllEnd 先于 setPoseOnEnd 触发（finger.destroy → onDestroy → AllEnd → setPose(End)）。
+    //    clearGestureAfterAllEnd 会清空 activeGestureRef（lastActiveGestureRef 保留）。
+    instance.trigger('allEnd', [])
+
+    // 4. setPoseOnEnd 紧随其后 — 如果没有 lastActiveGestureRef fallback，
+    //    applyPose('end') 会因 source 为 null 提前退出，settle 被跳过。
+    instance.options.setPoseOnEnd?.(container, {
+      position: { x: 110, y: 80 },
+      scale: 1
+    })
+    expect(endTransform).not.toHaveBeenCalled()
+
+    // 5. 推进时间让 spring 动画跑完
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+
+    // 6. 验证回弹到合法 contain target {0, 0}
+    //    有 bug 时 endTransform 永远不会被调用（卡在弹性值，无回弹）
+    expect(endTransform).toHaveBeenCalledWith(
+      { x: 0, y: 0, scale: 1 },
+      expect.objectContaining({ phase: 'end' })
+    )
+    expect(elasticActiveRef.current).toBe(false)
+  })
+
+  // ─────────────────────────────────────────────────────────────────────
+  // 补充回归：lastActiveGestureRef 不应在 AllEnd 时被清空，
+  // 否则它会与 activeGestureRef 一起被 nullified，从而抵消了 fallback。
+  // 验证：连续两次 drag → 第二次仍能正常 settle（第一次的 fallback 不会污染，
+  // 但 Start 时应清空它）。
+  // ─────────────────────────────────────────────────────────────────────
+  it('lastActiveGestureRef is cleared on next gesture Start (no cross-gesture leak)', () => {
+    vi.useFakeTimers()
+    const updateTransform = vi.fn()
+    const endTransform = vi.fn()
+    const elasticActiveRef = { current: false }
+    render(
+      <TestHarness
+        transform={{ x: 0, y: 0, scale: 1 }}
+        enabledInteractions={[VirtualPaperInteractionMode.MouseDragPan]}
+        updateTransform={updateTransform}
+        endTransform={endTransform}
+        containMode
+        edgeElasticScroll
+        elasticActiveRef={elasticActiveRef}
+      />
+    )
+
+    const wrapper = screen.getByTestId('wrapper')
+    const container = screen.getByTestId('container')
+    setupContainMocks(wrapper, container, {
+      wrapperWidth: 500,
+      wrapperHeight: 400,
+      containerWidth: 600,
+      containerHeight: 500
+    })
+
+    const instance = getLastInstance()
+
+    // 第一次手势：start → change → allEnd → setPoseOnEnd → settle
+    instance.trigger('start', [makeFinger('mouse')])
+    instance.options.setPose?.(container, { position: { x: 110, y: 80 }, scale: 1 })
+    instance.trigger('allEnd', [])
+    instance.options.setPoseOnEnd?.(container, { position: { x: 110, y: 80 }, scale: 1 })
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(endTransform).toHaveBeenCalledTimes(1)
+
+    // 第二次手势：Start 应清空 lastActiveGestureRef，
+    // 避免上次手势的 fallback 残留影响本次的 source 决策。
+    endTransform.mockClear()
+    updateTransform.mockClear()
+    instance.trigger('start', [makeFinger('mouse')])
+    instance.options.setPose?.(container, { position: { x: 90, y: 60 }, scale: 1 })
+    expect(updateTransform).toHaveBeenCalled()
+    instance.trigger('allEnd', [])
+    instance.options.setPoseOnEnd?.(container, { position: { x: 90, y: 60 }, scale: 1 })
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(endTransform).toHaveBeenCalledTimes(1)
+    expect(elasticActiveRef.current).toBe(false)
+  })
 })

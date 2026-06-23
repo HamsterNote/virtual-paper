@@ -64,6 +64,7 @@ export const VirtualPaper = ({
   const isControlled = controlledTransform !== undefined
   const isReaderMode = readerMode === true
   const isContainMode = containMode === true && !isReaderMode
+  const mouseDragEnabled = enabledInteractions.includes(VirtualPaperInteractionMode.MouseDragPan)
   const contentWidth = contentSize?.width
   const contentHeight = contentSize?.height
 
@@ -300,8 +301,7 @@ export const VirtualPaper = ({
     position: 'absolute',
     transformOrigin: '0 0',
     willChange: 'transform',
-    touchAction: 'none',
-    userSelect: 'none'
+    touchAction: 'none'
   } as const
 
   const {
@@ -337,8 +337,12 @@ export const VirtualPaper = ({
     ...wrapperPropsStyle
   }
 
+  const containerUserSelect = (mouseDragEnabled ? 'none' : 'text') as 'none' | 'text'
+
   const containerStyles = {
     ...baseContainerStyle,
+    userSelect: containerUserSelect,
+    WebkitUserSelect: containerUserSelect,
     ...containerStyle,
     ...containerPropsStyle,
     transform: transformStyle,
