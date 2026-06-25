@@ -237,6 +237,7 @@ describe('useWheelInteractions', () => {
   const installPausedAnimationFrame = () => {
     const callbacks = new Map<number, FrameRequestCallback>()
     let nextFrameId = 1
+    let fakeNow = 0
     const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
       const frameId = nextFrameId
       nextFrameId += 1
@@ -249,8 +250,37 @@ describe('useWheelInteractions', () => {
 
     vi.stubGlobal('requestAnimationFrame', requestAnimationFrame)
     vi.stubGlobal('cancelAnimationFrame', cancelAnimationFrame)
+    vi.stubGlobal('performance', {
+      now: () => fakeNow
+    })
 
-    return { requestAnimationFrame, cancelAnimationFrame, callbacks }
+    const flushFrame = (): number => {
+      const pending = [...callbacks.values()]
+      callbacks.clear()
+      fakeNow += 16
+      const timestamp = performance.now()
+      for (const cb of pending) {
+        cb(timestamp)
+      }
+      return pending.length
+    }
+
+    const flushUntilDone = (maxFrames = 500): number => {
+      let totalFrames = 0
+      while (totalFrames < maxFrames) {
+        const count = flushFrame()
+        if (count === 0) break
+        totalFrames += 1
+      }
+      return totalFrames
+    }
+
+    return {
+      requestAnimationFrame,
+      cancelAnimationFrame,
+      flushFrame,
+      flushUntilDone
+    }
   }
 
   it('attaches a non-passive wheel listener to the wrapper element', () => {
@@ -973,12 +1003,13 @@ describe('useWheelInteractions', () => {
     expect(elasticActiveRef.current).toBe(false)
   })
 
-  it('containMode: edge-elastic trackpad pan hard-projects to bounds without elastic resistance or settle animation', () => {
+  it('containMode: edge-elastic trackpad pan applies elastic resistance and settles back to bounds', () => {
     vi.useFakeTimers()
     const onUpdate = vi.fn()
     const onEnd = vi.fn()
     const elasticActiveRef = { current: false }
-    const { requestAnimationFrame } = installPausedAnimationFrame()
+    const { requestAnimationFrame, flushUntilDone } =
+      installPausedAnimationFrame()
 
     render(
       <WheelHarness
@@ -1004,17 +1035,27 @@ describe('useWheelInteractions', () => {
     dispatchWheel(wrapper, { deltaX: -1000, deltaY: -700, ctrlKey: false })
 
     expect(onUpdate).toHaveBeenCalledWith(
-      { x: 0, y: 0, scale: 1 },
+      expect.objectContaining({
+        x: expect.closeTo(550),
+        y: expect.closeTo(385),
+        scale: 1
+      }),
       expect.objectContaining({
         source: VirtualPaperInteractionMode.TrackpadScrollPan,
         phase: 'change'
       })
     )
-    expect(elasticActiveRef.current).toBe(false)
+    expect(elasticActiveRef.current).toBe(true)
     expect(requestAnimationFrame).not.toHaveBeenCalled()
 
     act(() => {
       vi.advanceTimersByTime(150)
+    })
+
+    expect(requestAnimationFrame).toHaveBeenCalled()
+
+    act(() => {
+      flushUntilDone()
     })
 
     expect(onEnd).toHaveBeenCalledWith(

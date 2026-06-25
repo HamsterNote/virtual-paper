@@ -98,7 +98,7 @@ describe('measureContainBox', () => {
     expect(measureContainBox(wrapper, container, 1)).toBeNull()
   })
 
-  it('returns null instead of amplifying rect fallback when scale is too small', () => {
+  it('uses rect fallback with clamped scale when scale is extremely small', () => {
     const wrapper = createMockElement({ clientWidth: 800, clientHeight: 600 })
     const container = createMockElement({
       offsetWidth: 0,
@@ -106,7 +106,15 @@ describe('measureContainBox', () => {
       rect: { width: 100, height: 80 }
     })
 
-    expect(measureContainBox(wrapper, container, 0.001)).toBeNull()
+    const result = measureContainBox(wrapper, container, 0.001)
+
+    // rect fallback uses MIN_SAFE_RECT_SCALE (0.01) instead of the actual scale
+    expect(result).toEqual({
+      wrapperWidth: 800,
+      wrapperHeight: 600,
+      containerWidth: 10000,
+      containerHeight: 8000
+    })
   })
 })
 

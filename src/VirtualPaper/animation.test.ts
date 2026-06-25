@@ -13,10 +13,12 @@ import type { VirtualPaperTransform } from './types'
 
 let rafCallbacks: Map<number, FrameRequestCallback>
 let rafIdCounter: number
+let fakeNow: number
 
 beforeEach(() => {
   rafCallbacks = new Map()
   rafIdCounter = 1
+  fakeNow = 0
 
   vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback): number => {
     const id = rafIdCounter++
@@ -26,6 +28,10 @@ beforeEach(() => {
 
   vi.stubGlobal('cancelAnimationFrame', (id: number): void => {
     rafCallbacks.delete(id)
+  })
+
+  vi.stubGlobal('performance', {
+    now: () => fakeNow
   })
 })
 
@@ -38,6 +44,7 @@ const flushFrame = (): number => {
   // 取快照，避免回调里新增的 rAF 也被本轮执行
   const pending = [...rafCallbacks.values()]
   rafCallbacks.clear()
+  fakeNow += 16
   const timestamp = performance.now()
   for (const cb of pending) {
     cb(timestamp)

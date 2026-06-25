@@ -9,9 +9,10 @@ const getMeasuredSize = (
   scale: number
 ): number => {
   if (layoutSize > 0) return layoutSize
-  if (rectSize <= 0 || !Number.isFinite(scale) || scale < MIN_SAFE_RECT_SCALE)
-    return 0
-  return rectSize / scale
+  if (rectSize <= 0 || !Number.isFinite(scale)) return 0
+  // 对极小的 scale 做保守估计，避免直接放弃 containment。
+  const safeScale = Math.max(scale, MIN_SAFE_RECT_SCALE)
+  return rectSize / safeScale
 }
 
 /**

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 
 import {
+  applyElasticContainResistance,
   applyZoomAnchor,
   clampReaderTransform,
   clampScale,
@@ -8,7 +9,10 @@ import {
   convertReaderLayoutToTransform,
   validateReaderModeZoomDebounceMs
 } from './transform'
-import { projectContainTransformForElements } from './containMode'
+import {
+  measureContainBox,
+  projectContainTransformForElements
+} from './containMode'
 import { createElasticSettleController } from './elasticSettle'
 import {
   type VirtualPaperContentSize,
@@ -121,6 +125,7 @@ export function useWheelInteractions(
   const latestArgsRef = useRef(args)
   const wheelEndTimerRef = useRef<number | null>(null)
   const wheelEndStateRef = useRef<WheelEndState | null>(null)
+  const elasticTargetTransformRef = useRef<VirtualPaperTransform | null>(null)
   const settleCancelRef = useRef<(() => void) | null>(null)
   const incrementElasticActiveRef = useRef(args.incrementElasticActive)
   const decrementElasticActiveRef = useRef(args.decrementElasticActive)
@@ -135,7 +140,9 @@ export function useWheelInteractions(
 
   const {
     setElasticActive,
-    cancelSettleAnimation
+    cancelSettleAnimation,
+    transformsMatch,
+    settleElasticTransform
   } = useMemo(
     () =>
       createElasticSettleController({
@@ -161,11 +168,24 @@ export function useWheelInteractions(
       inputType: 'wheel' as const,
       phase: 'end' as const
     }
+    const elasticTarget = elasticTargetTransformRef.current
+    elasticTargetTransformRef.current = null
     setElasticActive(false)
+
+    if (
+      elasticTarget &&
+      !transformsMatch(wheelEndState.transform, elasticTarget)
+    ) {
+      settleElasticTransform(wheelEndState.transform, elasticTarget, endMeta)
+      wheelEndStateRef.current = null
+      wheelEndTimerRef.current = null
+      return
+    }
+
     endTransformRef.current(wheelEndState.transform, endMeta)
     wheelEndStateRef.current = null
     wheelEndTimerRef.current = null
-  }, [setElasticActive])
+  }, [setElasticActive, settleElasticTransform, transformsMatch])
 
   const scheduleWheelEnd = useCallback(
     (
@@ -205,6 +225,7 @@ export function useWheelInteractions(
         updateTransform,
         isReaderMode,
         containMode,
+        edgeElasticScroll,
         readerModeZoomDebounceMs
       } = latestArgsRef.current
       const wrapper = wrapperRef.current
@@ -282,13 +303,48 @@ export function useWheelInteractions(
       cancelSettleAnimation()
 
       if (containMode && !isReaderMode && wrapper && containerRef.current) {
-        setElasticActive(false)
-        nextTransform = projectContainTransformForElements(
-          nextTransform,
-          wrapper,
-          containerRef.current
-        )
+        if (edgeElasticScroll) {
+          const box = measureContainBox(
+            wrapper,
+            containerRef.current,
+            nextTransform.scale
+          )
+          if (box) {
+            const elasticResult = applyElasticContainResistance({
+              transform: nextTransform,
+              containerSize: {
+                width: box.containerWidth,
+                height: box.containerHeight
+              },
+              wrapperSize: {
+                width: box.wrapperWidth,
+                height: box.wrapperHeight
+              },
+              enabled: true
+            })
+            elasticTargetTransformRef.current = elasticResult.targetTransform
+            nextTransform = elasticResult.elasticTransform
+            setElasticActive(
+              !transformsMatch(
+                elasticResult.elasticTransform,
+                elasticResult.targetTransform
+              )
+            )
+          } else {
+            elasticTargetTransformRef.current = null
+            setElasticActive(false)
+          }
+        } else {
+          elasticTargetTransformRef.current = null
+          setElasticActive(false)
+          nextTransform = projectContainTransformForElements(
+            nextTransform,
+            wrapper,
+            containerRef.current
+          )
+        }
       } else {
+        elasticTargetTransformRef.current = null
         setElasticActive(false)
       }
 

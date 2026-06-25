@@ -229,6 +229,10 @@ export const VirtualPaper = ({
 
     if (isReaderMode && !warnedMissingContentSizeRef.current) {
       warnedMissingContentSizeRef.current = true
+      console.warn(
+        'VirtualPaper: readerMode requires contentSize to compute native scroll geometry. ' +
+          'Falling back to wrapper dimensions; scaling and scrolling may not behave as expected.'
+      )
     }
 
     return {
@@ -284,7 +288,7 @@ export const VirtualPaper = ({
   // 场景：滚动期间触发 ctrl+wheel 缩放时，闭包里的 transform.scale 会过期，
   // 后续 scroll 事件会用 stale scale 覆盖最新值，导致缩放被回退。
   const transformRef = useRef(transform)
-  useEffect(() => {
+  useLayoutEffect(() => {
     transformRef.current = transform
   }, [transform])
 

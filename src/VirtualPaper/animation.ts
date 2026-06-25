@@ -32,13 +32,12 @@ export const createEaseAnimation = ({
 }: EaseAnimationOptions): (() => void) => {
   let frameId: number | null = null
   let cancelled = false
-  let frameCount = 0
+  const startTime = performance.now()
 
-  const step = () => {
+  const step = (now: number) => {
     if (cancelled) return
 
-    frameCount++
-    const elapsed = frameCount * 16
+    const elapsed = now - startTime
     const raw = elapsed / duration
     const t = raw >= 1 ? 1 : easeOutCubic(raw)
 
