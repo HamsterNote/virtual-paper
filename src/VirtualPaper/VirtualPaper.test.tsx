@@ -11,6 +11,9 @@ import {
 import { useMultiDragInteractions } from './useMultiDragInteractions'
 import { useWheelInteractions } from './useWheelInteractions'
 
+// allow: SIZE_OK — Existing component regression matrix is intentionally kept together;
+// splitting the suite is a separate behavior-preserving refactor outside this test-only task.
+
 vi.mock('./useMultiDragInteractions', () => ({
   useMultiDragInteractions: vi.fn()
 }))
@@ -29,50 +32,51 @@ const getLatestMultiDragArgs = () => {
   return calls[calls.length - 1][0]
 }
 
+type MockElementSize = { width: number; height: number }
+
 describe('VirtualPaper', () => {
   const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect
 
-  beforeEach(() => {
-    vi.clearAllMocks()
+  const createDOMRect = ({ width, height }: MockElementSize) =>
+    ({
+      width,
+      height,
+      top: 0,
+      left: 0,
+      right: width,
+      bottom: height,
+      x: 0,
+      y: 0,
+      toJSON() {
+        return this
+      }
+    }) as unknown as DOMRect
 
+  const mockVirtualPaperRectSizes = (sizes: {
+    wrapper: MockElementSize
+    container: MockElementSize
+  }) => {
     Element.prototype.getBoundingClientRect = function () {
       const testId = this.getAttribute('data-testid')
-      if (testId === 'virtual-paper-wrapper') {
-        return {
-          width: 800,
-          height: 600,
-          top: 0,
-          left: 0,
-          right: 800,
-          bottom: 600,
-          x: 0,
-          y: 0,
-          toJSON() {
-            return this
-          }
-        } as unknown as DOMRect
-      }
-      if (testId === 'virtual-paper-container') {
-        return {
-          width: 400,
-          height: 300,
-          top: 0,
-          left: 0,
-          right: 400,
-          bottom: 300,
-          x: 0,
-          y: 0,
-          toJSON() {
-            return this
-          }
-        } as unknown as DOMRect
-      }
+      if (testId === 'virtual-paper-wrapper')
+        return createDOMRect(sizes.wrapper)
+      if (testId === 'virtual-paper-container')
+        return createDOMRect(sizes.container)
       return originalGetBoundingClientRect.call(this)
     }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockVirtualPaperRectSizes({
+      wrapper: { width: 800, height: 600 },
+      container: { width: 400, height: 300 }
+    })
   })
 
   afterEach(() => {
     cleanup()
+    vi.unstubAllGlobals()
     Element.prototype.getBoundingClientRect = originalGetBoundingClientRect
   })
 
@@ -94,7 +98,9 @@ describe('VirtualPaper', () => {
       </VirtualPaper>
     )
     const container = screen.getByTestId('virtual-paper-container')
-    expect(container.style.transform).toBe('translate3d(200px, 150px, 0) scale(1)')
+    expect(container.style.transform).toBe(
+      'translate3d(200px, 150px, 0) scale(1)'
+    )
   })
 
   it('places container at top left when initialPlacement is TopLeft', () => {
@@ -107,6 +113,40 @@ describe('VirtualPaper', () => {
     expect(container.style.transform).toBe('translate3d(0px, 0px, 0) scale(1)')
   })
 
+  it('containMode initial center overrides TopLeft when container fits', () => {
+    render(
+      <VirtualPaper
+        containMode
+        initialPlacement={VirtualPaperInitialPlacement.TopLeft}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    const container = screen.getByTestId('virtual-paper-container')
+    expect(container.style.transform).toBe(
+      'translate3d(200px, 150px, 0) scale(1)'
+    )
+  })
+
+  it('containMode clamps an oversized defaultTransform into legal range', () => {
+    mockVirtualPaperRectSizes({
+      wrapper: { width: 800, height: 600 },
+      container: { width: 1000, height: 900 }
+    })
+
+    render(
+      <VirtualPaper containMode defaultTransform={{ x: 999, y: -999 }}>
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    const container = screen.getByTestId('virtual-paper-container')
+    expect(container.style.transform).toBe(
+      'translate3d(0px, -300px, 0) scale(1)'
+    )
+  })
+
   it('updates container transform when controlled prop changes', () => {
     const { rerender } = render(
       <VirtualPaper transform={{ x: 10, y: 20, scale: 1 }}>
@@ -114,14 +154,18 @@ describe('VirtualPaper', () => {
       </VirtualPaper>
     )
     const container = screen.getByTestId('virtual-paper-container')
-    expect(container.style.transform).toBe('translate3d(10px, 20px, 0) scale(1)')
+    expect(container.style.transform).toBe(
+      'translate3d(10px, 20px, 0) scale(1)'
+    )
 
     rerender(
       <VirtualPaper transform={{ x: 50, y: 100, scale: 2 }}>
         <div>child</div>
       </VirtualPaper>
     )
-    expect(container.style.transform).toBe('translate3d(50px, 100px, 0) scale(2)')
+    expect(container.style.transform).toBe(
+      'translate3d(50px, 100px, 0) scale(2)'
+    )
   })
 
   it('does not throw on unmount under StrictMode', () => {
@@ -145,7 +189,9 @@ describe('VirtualPaper', () => {
       </VirtualPaper>
     )
     const wrapper = screen.getByTestId('virtual-paper-wrapper')
-    expect(wrapper.className).toBe('virtual-paper-wrapper user-wrapper prop-wrapper')
+    expect(wrapper.className).toBe(
+      'virtual-paper-wrapper user-wrapper prop-wrapper'
+    )
   })
 
   it('lets wrapperProps className and style override top-level wrapper props', () => {
@@ -163,7 +209,9 @@ describe('VirtualPaper', () => {
     )
 
     const wrapper = screen.getByTestId('virtual-paper-wrapper')
-    expect(wrapper.className).toBe('virtual-paper-wrapper user-wrapper prop-wrapper')
+    expect(wrapper.className).toBe(
+      'virtual-paper-wrapper user-wrapper prop-wrapper'
+    )
     expect(wrapper.style.width).toBe('50%')
     expect(wrapper.style.overflow).toBe('visible')
     expect(wrapper.style.backgroundColor).toBe('red')
@@ -179,7 +227,9 @@ describe('VirtualPaper', () => {
       </VirtualPaper>
     )
     const container = screen.getByTestId('virtual-paper-container')
-    expect(container.className).toBe('virtual-paper-container user-container prop-container')
+    expect(container.className).toBe(
+      'virtual-paper-container user-container prop-container'
+    )
   })
 
   it('lets containerProps className and style override container props except owned transform styles', () => {
@@ -202,15 +252,23 @@ describe('VirtualPaper', () => {
     )
 
     const container = screen.getByTestId('virtual-paper-container')
-    expect(container.className).toBe('virtual-paper-container user-container prop-container')
+    expect(container.className).toBe(
+      'virtual-paper-container user-container prop-container'
+    )
     expect(container.style.touchAction).toBe('pan-x')
     expect(container.style.color).toBe('blue')
-    expect(container.style.transform).toBe('translate3d(200px, 150px, 0) scale(1)')
+    expect(container.style.transform).toBe(
+      'translate3d(200px, 150px, 0) scale(1)'
+    )
     expect(container.style.transformOrigin).toBe('0 0')
   })
 
   it('applies base wrapper styles', () => {
-    render(<VirtualPaper><div>child</div></VirtualPaper>)
+    render(
+      <VirtualPaper>
+        <div>child</div>
+      </VirtualPaper>
+    )
     const wrapper = screen.getByTestId('virtual-paper-wrapper')
     expect(wrapper.style.position).toBe('relative')
     expect(wrapper.style.overflow).toBe('hidden')
@@ -219,12 +277,40 @@ describe('VirtualPaper', () => {
   })
 
   it('applies base container styles', () => {
-    render(<VirtualPaper><div>child</div></VirtualPaper>)
+    render(
+      <VirtualPaper>
+        <div>child</div>
+      </VirtualPaper>
+    )
     const container = screen.getByTestId('virtual-paper-container')
     expect(container.style.position).toBe('absolute')
     expect(container.style.willChange).toBe('transform')
     expect(container.style.touchAction).toBe('none')
+    expect(container.style.userSelect).toBe('text')
+  })
+
+  it('disables userSelect on container when MouseDragPan is enabled', () => {
+    render(
+      <VirtualPaper
+        enabledInteractions={[VirtualPaperInteractionMode.MouseDragPan]}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
     expect(container.style.userSelect).toBe('none')
+  })
+
+  it('enables text selection on container when MouseDragPan is not enabled', () => {
+    render(
+      <VirtualPaper
+        enabledInteractions={[VirtualPaperInteractionMode.TouchSingleFingerPan]}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
+    expect(container.style.userSelect).toBe('text')
   })
 
   it('calls onTransformChange in uncontrolled mode on initial placement', () => {
@@ -255,7 +341,9 @@ describe('VirtualPaper', () => {
       </VirtualPaper>
     )
     const container = screen.getByTestId('virtual-paper-container')
-    expect(container.style.transform).toBe('translate3d(42px, 24px, 0) scale(1.5)')
+    expect(container.style.transform).toBe(
+      'translate3d(42px, 24px, 0) scale(1.5)'
+    )
   })
 
   it('merges defaultTransform in uncontrolled mode', () => {
@@ -265,28 +353,42 @@ describe('VirtualPaper', () => {
       </VirtualPaper>
     )
     const container = screen.getByTestId('virtual-paper-container')
-    expect(container.style.transform).toBe('translate3d(200px, 150px, 0) scale(2)')
+    expect(container.style.transform).toBe(
+      'translate3d(200px, 150px, 0) scale(2)'
+    )
   })
 
   it('clamps defaultTransform scale to minScale and maxScale', () => {
     render(
-      <VirtualPaper defaultTransform={{ scale: 10 }} minScale={0.25} maxScale={4}>
+      <VirtualPaper
+        defaultTransform={{ scale: 10 }}
+        minScale={0.25}
+        maxScale={4}
+      >
         <div>child</div>
       </VirtualPaper>
     )
     const container = screen.getByTestId('virtual-paper-container')
-    expect(container.style.transform).toBe('translate3d(200px, 150px, 0) scale(4)')
+    expect(container.style.transform).toBe(
+      'translate3d(200px, 150px, 0) scale(4)'
+    )
   })
 
   it('clamps defaultTransform scale up to minScale in the component', () => {
     render(
-      <VirtualPaper defaultTransform={{ scale: 0.1 }} minScale={0.5} maxScale={4}>
+      <VirtualPaper
+        defaultTransform={{ scale: 0.1 }}
+        minScale={0.5}
+        maxScale={4}
+      >
         <div>child</div>
       </VirtualPaper>
     )
 
     const container = screen.getByTestId('virtual-paper-container')
-    expect(container.style.transform).toBe('translate3d(200px, 150px, 0) scale(0.5)')
+    expect(container.style.transform).toBe(
+      'translate3d(200px, 150px, 0) scale(0.5)'
+    )
   })
 
   it('passes custom scale limits to interaction hooks', () => {
@@ -313,6 +415,28 @@ describe('VirtualPaper', () => {
       </VirtualPaper>
     )
     expect(onTransformChange).not.toHaveBeenCalled()
+  })
+
+  it('containMode projects a controlled illegal transform without firing onTransformChange from render', () => {
+    const onTransformChange = vi.fn()
+    const transform = { x: 999, y: -999, scale: 1 }
+
+    render(
+      <VirtualPaper
+        containMode
+        transform={transform}
+        onTransformChange={onTransformChange}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    const container = screen.getByTestId('virtual-paper-container')
+    expect(container.style.transform).toBe(
+      'translate3d(200px, 150px, 0) scale(1)'
+    )
+    expect(onTransformChange).not.toHaveBeenCalled()
+    expect(transform).toEqual({ x: 999, y: -999, scale: 1 })
   })
 
   it('does not persist hook updates internally in controlled mode', () => {
@@ -355,7 +479,9 @@ describe('VirtualPaper', () => {
         <div>child</div>
       </VirtualPaper>
     )
-    expect(container.style.transform).toBe('translate3d(5px, 6px, 0) scale(1.5)')
+    expect(container.style.transform).toBe(
+      'translate3d(5px, 6px, 0) scale(1.5)'
+    )
   })
 
   it('updates internal state and forwards meta for hook changes in uncontrolled mode', () => {
@@ -379,7 +505,9 @@ describe('VirtualPaper', () => {
     })
 
     const container = screen.getByTestId('virtual-paper-container')
-    expect(container.style.transform).toBe('translate3d(25px, 35px, 0) scale(1.25)')
+    expect(container.style.transform).toBe(
+      'translate3d(25px, 35px, 0) scale(1.25)'
+    )
     expect(onTransformChange).toHaveBeenCalledWith(
       { x: 25, y: 35, scale: 1.25 },
       {
@@ -421,12 +549,16 @@ describe('VirtualPaper', () => {
     expect(onTransformChange).toHaveBeenNthCalledWith(
       1,
       { x: 10, y: 20, scale: 1 },
-      expect.objectContaining({ source: VirtualPaperInteractionMode.MouseWheelCtrlZoom })
+      expect.objectContaining({
+        source: VirtualPaperInteractionMode.MouseWheelCtrlZoom
+      })
     )
     expect(onTransformChange).toHaveBeenNthCalledWith(
       2,
       { x: 15, y: 25, scale: 2 },
-      expect.objectContaining({ source: VirtualPaperInteractionMode.TouchTwoFingerZoom })
+      expect.objectContaining({
+        source: VirtualPaperInteractionMode.TouchTwoFingerZoom
+      })
     )
   })
 
@@ -450,7 +582,9 @@ describe('VirtualPaper', () => {
     })
 
     const container = screen.getByTestId('virtual-paper-container')
-    expect(container.style.transform).toBe('translate3d(40px, 50px, 0) scale(1.5)')
+    expect(container.style.transform).toBe(
+      'translate3d(40px, 50px, 0) scale(1.5)'
+    )
     expect(onTransformChangeEnd).toHaveBeenCalledWith(
       { x: 40, y: 50, scale: 1.5 },
       {
@@ -462,20 +596,36 @@ describe('VirtualPaper', () => {
   })
 
   it('wrapper has default data-testid', () => {
-    render(<VirtualPaper><div>child</div></VirtualPaper>)
+    render(
+      <VirtualPaper>
+        <div>child</div>
+      </VirtualPaper>
+    )
     expect(screen.getByTestId('virtual-paper-wrapper')).toBeInTheDocument()
   })
 
   it('container has default data-testid', () => {
-    render(<VirtualPaper><div>child</div></VirtualPaper>)
+    render(
+      <VirtualPaper>
+        <div>child</div>
+      </VirtualPaper>
+    )
     expect(screen.getByTestId('virtual-paper-container')).toBeInTheDocument()
   })
 
   it('accepts custom data-testid from wrapperProps and containerProps', () => {
     render(
       <VirtualPaper
-        wrapperProps={{ 'data-testid': 'custom-wrapper' } as React.HTMLAttributes<HTMLDivElement>}
-        containerProps={{ 'data-testid': 'custom-container' } as React.HTMLAttributes<HTMLDivElement>}
+        wrapperProps={
+          {
+            'data-testid': 'custom-wrapper'
+          } as React.HTMLAttributes<HTMLDivElement>
+        }
+        containerProps={
+          {
+            'data-testid': 'custom-container'
+          } as React.HTMLAttributes<HTMLDivElement>
+        }
       >
         <div>child</div>
       </VirtualPaper>
@@ -538,7 +688,282 @@ describe('VirtualPaper', () => {
     ]
 
     expect(DEFAULT_ENABLED_INTERACTIONS).toEqual(expectedDefaults)
-    expect(getLatestWheelArgs().enabledInteractions).toBe(DEFAULT_ENABLED_INTERACTIONS)
-    expect(getLatestMultiDragArgs().enabledInteractions).toBe(DEFAULT_ENABLED_INTERACTIONS)
+    expect(getLatestWheelArgs().enabledInteractions).toBe(
+      DEFAULT_ENABLED_INTERACTIONS
+    )
+    expect(getLatestMultiDragArgs().enabledInteractions).toBe(
+      DEFAULT_ENABLED_INTERACTIONS
+    )
+  })
+
+  it('passes containMode: false to hooks by default', () => {
+    render(
+      <VirtualPaper>
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    expect(getLatestMultiDragArgs().containMode).toBe(false)
+    expect(getLatestWheelArgs().containMode).toBe(false)
+  })
+
+  it('passes containMode: true to hooks when prop is true in non-reader mode', () => {
+    render(
+      <VirtualPaper containMode>
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    expect(getLatestMultiDragArgs().containMode).toBe(true)
+    expect(getLatestWheelArgs().containMode).toBe(true)
+  })
+
+  it('passes containMode: false to hooks in reader mode even when prop is true', () => {
+    render(
+      <VirtualPaper
+        containMode
+        readerMode
+        contentSize={{ width: 400, height: 300 }}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    expect(getLatestMultiDragArgs().containMode).toBe(false)
+    expect(getLatestWheelArgs().containMode).toBe(false)
+  })
+
+  it('passes scroll opt-in switches as false to hooks by default', () => {
+    render(
+      <VirtualPaper>
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    expect(getLatestMultiDragArgs().edgeElasticScroll).toBe(false)
+    expect(getLatestWheelArgs().edgeElasticScroll).toBe(false)
+  })
+
+  it('passes true scroll opt-in switches through to both hooks', () => {
+    render(
+      <VirtualPaper edgeElasticScroll>
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    expect(getLatestMultiDragArgs().edgeElasticScroll).toBe(true)
+    expect(getLatestWheelArgs().edgeElasticScroll).toBe(true)
+  })
+
+  it('renders raw contain transform only while elastic is active', () => {
+    mockVirtualPaperRectSizes({
+      wrapper: { width: 800, height: 600 },
+      container: { width: 1000, height: 900 }
+    })
+
+    render(
+      <VirtualPaper
+        containMode
+        edgeElasticScroll
+        initialPlacement={VirtualPaperInitialPlacement.TopLeft}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
+
+    expect(container.style.transform).toBe('translate3d(0px, 0px, 0) scale(1)')
+
+    act(() => {
+      getLatestWheelArgs().incrementElasticActive?.()
+      getLatestWheelArgs().updateTransform(
+        { x: 999, y: -999, scale: 1 },
+        {
+          source: VirtualPaperInteractionMode.TrackpadScrollPan,
+          inputType: 'wheel',
+          phase: 'change'
+        }
+      )
+    })
+
+    expect(container.style.transform).toBe(
+      'translate3d(999px, -999px, 0) scale(1)'
+    )
+
+    act(() => {
+      getLatestWheelArgs().decrementElasticActive?.()
+      getLatestWheelArgs().endTransform(
+        { x: 0, y: -300, scale: 1 },
+        {
+          source: VirtualPaperInteractionMode.TrackpadScrollPan,
+          inputType: 'wheel',
+          phase: 'end'
+        }
+      )
+    })
+
+    expect(container.style.transform).toBe(
+      'translate3d(0px, -300px, 0) scale(1)'
+    )
+  })
+
+  it('renders active edge-elastic overshoot instead of the default contain projection', () => {
+    mockVirtualPaperRectSizes({
+      wrapper: { width: 800, height: 600 },
+      container: { width: 1000, height: 900 }
+    })
+
+    render(
+      <VirtualPaper
+        containMode
+        edgeElasticScroll
+        initialPlacement={VirtualPaperInitialPlacement.TopLeft}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
+
+    act(() => {
+      getLatestWheelArgs().incrementElasticActive?.()
+      getLatestWheelArgs().updateTransform(
+        { x: 550, y: 385, scale: 1 },
+        {
+          source: VirtualPaperInteractionMode.TrackpadScrollPan,
+          inputType: 'wheel',
+          phase: 'change'
+        }
+      )
+    })
+
+    expect(container.style.transform).toBe(
+      'translate3d(550px, 385px, 0) scale(1)'
+    )
+  })
+
+  it('default edgeElasticScroll off keeps contain projection', () => {
+    mockVirtualPaperRectSizes({
+      wrapper: { width: 800, height: 600 },
+      container: { width: 1000, height: 900 }
+    })
+
+    render(
+      <VirtualPaper
+        containMode
+        initialPlacement={VirtualPaperInitialPlacement.TopLeft}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
+
+    act(() => {
+      getLatestWheelArgs().updateTransform(
+        { x: 550, y: 385, scale: 1 },
+        {
+          source: VirtualPaperInteractionMode.TrackpadScrollPan,
+          inputType: 'wheel',
+          phase: 'change'
+        }
+      )
+    })
+
+    expect(container.style.transform).toBe('translate3d(0px, 0px, 0) scale(1)')
+  })
+
+  it('re-projects display transform on ResizeObserver and window resize without firing onTransformChange', () => {
+    const sizes = {
+      wrapper: { width: 800, height: 600 },
+      container: { width: 400, height: 300 }
+    }
+    mockVirtualPaperRectSizes(sizes)
+
+    let resizeObserverCallback: ResizeObserverCallback | undefined
+    class MockResizeObserver {
+      observe = vi.fn()
+      disconnect = vi.fn()
+      unobserve = vi.fn()
+
+      constructor(callback: ResizeObserverCallback) {
+        resizeObserverCallback = callback
+      }
+    }
+
+    vi.stubGlobal('ResizeObserver', MockResizeObserver)
+    const observedChange = vi.fn()
+    const observedRender = render(
+      <VirtualPaper containMode onTransformChange={observedChange}>
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    expect(screen.getByTestId('virtual-paper-container').style.transform).toBe(
+      'translate3d(200px, 150px, 0) scale(1)'
+    )
+    observedChange.mockClear()
+
+    act(() => {
+      sizes.wrapper = { width: 1000, height: 900 }
+      resizeObserverCallback?.([], {} as ResizeObserver)
+    })
+
+    expect(screen.getByTestId('virtual-paper-container').style.transform).toBe(
+      'translate3d(300px, 300px, 0) scale(1)'
+    )
+    expect(observedChange).not.toHaveBeenCalled()
+    observedRender.unmount()
+
+    vi.unstubAllGlobals()
+    vi.stubGlobal('ResizeObserver', undefined)
+    sizes.wrapper = { width: 800, height: 600 }
+    sizes.container = { width: 400, height: 300 }
+    const fallbackChange = vi.fn()
+    render(
+      <VirtualPaper containMode onTransformChange={fallbackChange}>
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    expect(screen.getByTestId('virtual-paper-container').style.transform).toBe(
+      'translate3d(200px, 150px, 0) scale(1)'
+    )
+    fallbackChange.mockClear()
+
+    act(() => {
+      sizes.wrapper = { width: 1000, height: 900 }
+      window.dispatchEvent(new Event('resize'))
+    })
+
+    expect(screen.getByTestId('virtual-paper-container').style.transform).toBe(
+      'translate3d(300px, 300px, 0) scale(1)'
+    )
+    expect(fallbackChange).not.toHaveBeenCalled()
+  })
+
+  it('default (no containMode prop) keeps existing center placement behavior', () => {
+    render(
+      <VirtualPaper>
+        <div>child</div>
+      </VirtualPaper>
+    )
+    const container = screen.getByTestId('virtual-paper-container')
+    expect(container.style.transform).toBe(
+      'translate3d(200px, 150px, 0) scale(1)'
+    )
+  })
+
+  it('containMode={false} renders raw controlled transform without projection', () => {
+    const transform = { x: 999, y: -999, scale: 1 }
+
+    render(
+      <VirtualPaper containMode={false} transform={transform}>
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    const container = screen.getByTestId('virtual-paper-container')
+    expect(container.style.transform).toBe(
+      'translate3d(999px, -999px, 0) scale(1)'
+    )
   })
 })

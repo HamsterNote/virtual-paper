@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### 移除
+- 移除 `inertialScroll` 属性及相关支持
+- 移除演示中惯性滚动的开关
+
+### 变更
+- 多拖拽惯性模式现在始终处于禁用状态
+- `edgeElasticScroll` 与 `readerMode` 继续保持支持
+
 ## [0.1.0-beta.1] - 2026-06-18
 
 ### 新增

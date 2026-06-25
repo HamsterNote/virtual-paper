@@ -30,6 +30,26 @@ async function readTransform(page: Page): Promise<TransformReadout> {
   }
 }
 
+async function readVisualTransform(page: Page): Promise<TransformReadout> {
+  const transform = await page
+    .locator('[data-testid="virtual-paper-container"]')
+    .evaluate((element) => getComputedStyle(element).transform)
+
+  if (transform === 'none') {
+    return { x: 0, y: 0, scale: 1 }
+  }
+
+  const values = transform.match(/-?\d+(?:\.\d+)?(?:e-?\d+)?/gi)
+  expect(values, `Unexpected visual transform: ${transform}`).not.toBeNull()
+  const numbers = values?.map(Number) ?? []
+
+  if (transform.startsWith('matrix3d')) {
+    return { x: numbers[12], y: numbers[13], scale: numbers[0] }
+  }
+
+  return { x: numbers[4], y: numbers[5], scale: numbers[0] }
+}
+
 /** 通过 CDP 发送多指触摸事件 */
 async function dispatchTouch(
   client: CDPSession,
@@ -103,7 +123,9 @@ test.describe('Pinch zoom TouchEnd jump', () => {
 
     // ── 关键：抬第一根手指（2 → 1），此刻为跳变点 ──
     const beforeLift = await readTransform(page)
-    await dispatchTouch(client, 'touchEnd', [{ x: cx - halfSpreadEnd, y: cy, id: 0 }])
+    await dispatchTouch(client, 'touchEnd', [
+      { x: cx - halfSpreadEnd, y: cy, id: 0 }
+    ])
     await page.waitForTimeout(150) // 等 setPoseOnEnd + React 回调落地
 
     const afterLift = await readTransform(page)
@@ -117,7 +139,9 @@ test.describe('Pinch zoom TouchEnd jump', () => {
     expect(Math.abs(afterLift.y - beforeLift.y)).toBeLessThanOrEqual(3)
 
     // 收尾：抬第二根手指（1 → 0），不应产生新跳变
-    await dispatchTouch(client, 'touchEnd', [{ x: cx + halfSpreadEnd, y: cy, id: 1 }])
+    await dispatchTouch(client, 'touchEnd', [
+      { x: cx + halfSpreadEnd, y: cy, id: 1 }
+    ])
     await page.waitForTimeout(150)
     const afterAllLift = await readTransform(page)
     expect(Math.abs(afterAllLift.x - afterLift.x)).toBeLessThanOrEqual(3)
@@ -217,12 +241,18 @@ test.describe('Pinch zoom TouchEnd jump', () => {
     expect(Math.abs(afterMove.x - afterLift.x)).toBeLessThanOrEqual(3)
     expect(Math.abs(afterMove.y - afterLift.y)).toBeLessThanOrEqual(3)
     // scale 也应保持不变
-    expect(Math.abs(afterMove.scale - afterLift.scale)).toBeLessThanOrEqual(0.05)
+    expect(Math.abs(afterMove.scale - afterLift.scale)).toBeLessThanOrEqual(
+      0.05
+    )
 
     // ── 收尾：抬最后一根手指（1 → 0） ──
     //   AllEnd 触发 clearGesture，reset singlePanBlockedAfterMultiRef
     await dispatchTouch(client, 'touchEnd', [
-      { x: moves[moves.length - 1].x, y: moves[moves.length - 1].y, id: remainingId }
+      {
+        x: moves[moves.length - 1].x,
+        y: moves[moves.length - 1].y,
+        id: remainingId
+      }
     ])
     await page.waitForTimeout(150)
     const afterAllLift = await readTransform(page)
@@ -249,5 +279,136 @@ test.describe('Pinch zoom TouchEnd jump', () => {
     await dispatchTouch(client, 'touchEnd', [
       { x: cx + 50, y: cy + 30, id: singleFingerId }
     ])
+  })
+
+  test('same-scale two-finger move after pinch does not jump when two-finger pan is enabled', async ({
+    page
+  }) => {
+    await page.goto('/')
+    await page.waitForLoadState?.('networkidle')
+    await expect(
+      page.locator('[data-testid="transform-readout"]')
+    ).toBeVisible()
+
+    const twoFingerZoomToggle = page.locator(
+      '[data-testid="mode-toggle-TouchTwoFingerZoom"]'
+    )
+    const twoFingerPanToggle = page.locator(
+      '[data-testid="mode-toggle-TouchTwoFingerPan"]'
+    )
+    if (!(await twoFingerZoomToggle.isChecked())) {
+      await twoFingerZoomToggle.check()
+    }
+    if (!(await twoFingerPanToggle.isChecked())) {
+      await twoFingerPanToggle.check()
+    }
+
+    const wrapper = page.locator('[data-testid="virtual-paper-wrapper"]')
+    const box = await wrapper.boundingBox()
+    expect(box).not.toBeNull()
+    const cx = box!.x + box!.width / 2
+    const cy = box!.y + box!.height / 2
+
+    const client = await page.context().newCDPSession(page)
+    await client.send('Emulation.setTouchEmulationEnabled', {
+      enabled: true
+    })
+
+    const halfSpreadStart = 50
+    const halfSpreadEnd = 120
+    await dispatchTouch(client, 'touchStart', [
+      { x: cx - halfSpreadStart, y: cy, id: 0 },
+      { x: cx + halfSpreadStart, y: cy, id: 1 }
+    ])
+    await dispatchTouch(client, 'touchMove', [
+      { x: cx - halfSpreadEnd, y: cy, id: 0 },
+      { x: cx + halfSpreadEnd, y: cy, id: 1 }
+    ])
+    await expect
+      .poll(async () => (await readTransform(page)).scale)
+      .toBeGreaterThan(1.3)
+
+    const beforeMove = await readTransform(page)
+    await dispatchTouch(client, 'touchMove', [
+      { x: cx - halfSpreadEnd + 20, y: cy + 10, id: 0 },
+      { x: cx + halfSpreadEnd + 20, y: cy + 10, id: 1 }
+    ])
+    await page.waitForTimeout(150)
+    const afterMove = await readTransform(page)
+
+    expect(Math.abs(afterMove.x - beforeMove.x)).toBeLessThanOrEqual(35)
+    expect(Math.abs(afterMove.y - beforeMove.y)).toBeLessThanOrEqual(25)
+    expect(Math.abs(afterMove.scale - beforeMove.scale)).toBeLessThanOrEqual(
+      0.05
+    )
+
+    await dispatchTouch(client, 'touchEnd', [
+      { x: cx - halfSpreadEnd + 20, y: cy + 10, id: 0 },
+      { x: cx + halfSpreadEnd + 20, y: cy + 10, id: 1 }
+    ])
+  })
+
+  test('rapid repeated pinch end keeps the last rendered zoom position', async ({
+    page
+  }) => {
+    await page.goto('/')
+    await page.waitForLoadState?.('networkidle')
+    await expect(
+      page.locator('[data-testid="transform-readout"]')
+    ).toBeVisible()
+
+    const wrapper = page.locator('[data-testid="virtual-paper-wrapper"]')
+    const box = await wrapper.boundingBox()
+    expect(box).not.toBeNull()
+
+    const cx = box!.x + box!.width / 2
+    const cy = box!.y + box!.height / 2
+    const client = await page.context().newCDPSession(page)
+    await client.send('Emulation.setTouchEmulationEnabled', {
+      enabled: true
+    })
+
+    const pinch = async (pointerBase: number, halfSpreadEnd: number) => {
+      const halfSpreadStart = 70
+      const leftId = pointerBase
+      const rightId = pointerBase + 1
+
+      await dispatchTouch(client, 'touchStart', [
+        { x: cx - halfSpreadStart, y: cy, id: leftId },
+        { x: cx + halfSpreadStart, y: cy, id: rightId }
+      ])
+      await dispatchTouch(client, 'touchMove', [
+        { x: cx - halfSpreadEnd, y: cy, id: leftId },
+        { x: cx + halfSpreadEnd, y: cy, id: rightId }
+      ])
+
+      await expect
+        .poll(async () => (await readTransform(page)).scale)
+        .not.toBeCloseTo(1, 1)
+
+      const beforeEnd = await readTransform(page)
+      const beforeVisualEnd = await readVisualTransform(page)
+      await dispatchTouch(client, 'touchEnd', [
+        { x: cx - halfSpreadEnd, y: cy, id: leftId },
+        { x: cx + halfSpreadEnd, y: cy, id: rightId }
+      ])
+      await page.waitForTimeout(150)
+      const afterEnd = await readTransform(page)
+      const afterVisualEnd = await readVisualTransform(page)
+
+      expect(Math.abs(afterEnd.x - beforeEnd.x)).toBeLessThanOrEqual(3)
+      expect(Math.abs(afterEnd.y - beforeEnd.y)).toBeLessThanOrEqual(3)
+      expect(Math.abs(afterVisualEnd.x - beforeVisualEnd.x)).toBeLessThanOrEqual(
+        3
+      )
+      expect(Math.abs(afterVisualEnd.y - beforeVisualEnd.y)).toBeLessThanOrEqual(
+        3
+      )
+    }
+
+    await pinch(10, 120)
+    await pinch(20, 45)
+    await pinch(30, 120)
+    await pinch(40, 45)
   })
 })

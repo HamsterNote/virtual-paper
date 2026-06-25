@@ -39,7 +39,7 @@ jobs:
           # 去掉 v 前缀
           VERSION="${GITHUB_REF#refs/tags/v}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          
+
           # 判断是否为 beta 版本
           if [[ "$VERSION" == *"-beta"* ]]; then
             echo "tag=beta" >> $GITHUB_OUTPUT

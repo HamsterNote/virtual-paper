@@ -3,7 +3,6 @@ import {
   VirtualPaper,
   VirtualPaperInteractionMode,
   VirtualPaperInitialPlacement,
-  VirtualPaperRenderMode,
   DEFAULT_ENABLED_INTERACTIONS
 } from './index'
 import type { VirtualPaperTransform } from './index'
@@ -19,8 +18,6 @@ export default function App() {
     VirtualPaperInitialPlacement.Center
   )
 
-  const [renderMode, setRenderMode] = useState(VirtualPaperRenderMode.Transform)
-
   const [isControlled, setIsControlled] = useState(false)
 
   const [controlledTransform, setControlledTransform] =
@@ -31,9 +28,26 @@ export default function App() {
 
   const [remountKey, setRemountKey] = useState(0)
 
+  const [readerMode, setReaderMode] = useState(false)
+
+  const [containMode, setContainMode] = useState(false)
+
+  const [edgeElasticScroll, setEdgeElasticScroll] = useState(false)
+
+  // 等比缩放：开启后，大卡片内部尺寸随其视觉渲染宽度按比例缩放。
+  const [proportionalScaling, setProportionalScaling] = useState(false)
+
   const [controlledX, setControlledX] = useState('0')
   const [controlledY, setControlledY] = useState('0')
   const [controlledScale, setControlledScale] = useState('1')
+
+  /**
+   * 等比缩放系数：
+   * 开启等比缩放时，使用 VirtualPaper 通过 onTransformChange 报告的 scale。
+   * 大卡片视觉宽度 = containerStyle.width * scale，内部尺寸按同一比例缩放。
+   * 关闭时固定为 1，保持原始 Demo 视觉效果。
+   */
+  const proportionalScale = proportionalScaling ? readoutTransform.scale : 1
 
   const toggleMode = useCallback((mode: VirtualPaperInteractionMode) => {
     setEnabledInteractions((prev) =>
@@ -85,28 +99,6 @@ export default function App() {
         <h2>VirtualPaper 控制器</h2>
 
         <section className="control-section">
-          <h3>渲染模式</h3>
-          <label className="mode-toggle">
-            <input
-              type="radio"
-              data-testid="render-mode-Transform"
-              checked={renderMode === VirtualPaperRenderMode.Transform}
-              onChange={() => setRenderMode(VirtualPaperRenderMode.Transform)}
-            />
-            <span>Transform (translate + scale)</span>
-          </label>
-          <label className="mode-toggle">
-            <input
-              type="radio"
-              data-testid="render-mode-Scroll"
-              checked={renderMode === VirtualPaperRenderMode.Scroll}
-              onChange={() => setRenderMode(VirtualPaperRenderMode.Scroll)}
-            />
-            <span>Scroll (宽高 + scrollLeft)</span>
-          </label>
-        </section>
-
-        <section className="control-section">
           <h3>交互模式</h3>
           {ALL_MODES.map((mode) => (
             <label key={mode} className="mode-toggle">
@@ -132,13 +124,80 @@ export default function App() {
               )
             }
           >
-            <option value={VirtualPaperInitialPlacement.Center}>
-              Center
-            </option>
+            <option value={VirtualPaperInitialPlacement.Center}>Center</option>
             <option value={VirtualPaperInitialPlacement.TopLeft}>
               TopLeft
             </option>
           </select>
+        </section>
+
+        <section className="control-section">
+          <h3>阅读模式</h3>
+          <label className="mode-toggle">
+            <input
+              type="checkbox"
+              data-testid="reader-mode-toggle"
+              checked={readerMode}
+              onChange={(e) => {
+                setReaderMode(e.target.checked)
+                setRemountKey((k) => k + 1)
+              }}
+            />
+            <span>启用阅读模式</span>
+          </label>
+        </section>
+
+        <section className="control-section">
+          <h3>Contain Mode</h3>
+          <label className="mode-toggle">
+            <input
+              type="checkbox"
+              data-testid="contain-mode-toggle"
+              checked={containMode}
+              onChange={(e) => {
+                setContainMode(e.target.checked)
+                setRemountKey((k) => k + 1)
+              }}
+            />
+            <span>启用 contain mode</span>
+          </label>
+        </section>
+
+        <section className="control-section">
+          <h3>Edge Elastic Scroll</h3>
+          <label className="mode-toggle">
+            <input
+              type="checkbox"
+              data-testid="edge-elastic-scroll-toggle"
+              checked={edgeElasticScroll}
+              onChange={(e) => {
+                setEdgeElasticScroll(e.target.checked)
+                setRemountKey((k) => k + 1)
+              }}
+            />
+            <span>启用边缘弹性滚动</span>
+          </label>
+        </section>
+
+        <section className="control-section">
+          <h3>等比缩放</h3>
+          <label className="mode-toggle">
+            <input
+              type="checkbox"
+              data-testid="proportional-scaling-toggle"
+              checked={proportionalScaling}
+              onChange={(e) => {
+                setProportionalScaling(e.target.checked)
+                setRemountKey((k) => k + 1)
+              }}
+            />
+            <span>启用等比缩放</span>
+          </label>
+          {proportionalScaling && (
+            <div data-testid="proportional-scale-readout">
+              缩放比例: {proportionalScale.toFixed(3)}
+            </div>
+          )}
         </section>
 
         <section className="control-section">
@@ -214,35 +273,93 @@ export default function App() {
           key={remountKey}
           enabledInteractions={enabledInteractions}
           initialPlacement={initialPlacement}
-          renderMode={renderMode}
-          contentSize={{ width: 600, height: 400 }}
-          // transform 模式下 container 需显式尺寸（子元素用 100% 撑满）；
-          // scroll 模式下此值被 scaledWidth/Height 覆盖
           containerStyle={{ width: 600, height: 400 }}
+          containMode={containMode}
+          edgeElasticScroll={edgeElasticScroll}
           {...(isControlled ? { transform: controlledTransform } : {})}
           onTransformChange={handleTransformChange}
+          {...(readerMode
+            ? {
+                readerMode: true,
+                contentSize: { width: 600, height: 400 },
+                readerModeZoomDebounceMs: 500
+              }
+            : {})}
         >
           <div
+            data-testid="demo-big-card"
             style={{
               width: '100%',
               height: '100%',
+              overflow: 'hidden',
               background: '#f0f0f0',
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: 10,
-              padding: 20
+              padding: `${24 * proportionalScale}px`,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: `${16 * proportionalScale}px`
             }}
           >
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div
-                key={i}
-                style={{
-                  background: '#3498db',
-                  borderRadius: 8,
-                  height: 80
-                }}
-              />
-            ))}
+            <h2
+              style={{
+                margin: 0,
+                color: '#2c3e50',
+                fontSize: `${22 * proportionalScale}px`
+              }}
+            >
+              VirtualPaper Demo
+            </h2>
+            <p
+              style={{
+                margin: 0,
+                lineHeight: 1.7,
+                color: '#34495e',
+                fontSize: `${15 * proportionalScale}px`
+              }}
+            >
+              这是一段示例文字。当左侧控制面板中的 MouseDragPan
+              未勾选时，你可以用鼠标自由选中、复制这段文字。
+              文字选择不会触发画布拖拽，选择范围从你点击的位置开始，而非从首个字符开始。
+            </p>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: `${10 * proportionalScale}px`
+              }}
+            >
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div
+                  key={i}
+                  data-testid={`demo-card-${i}`}
+                  style={{
+                    background: '#3498db',
+                    borderRadius: `${8 * proportionalScale}px`,
+                    height: `${80 * proportionalScale}px`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#fff',
+                    fontWeight: 700,
+                    fontSize: `${14 * proportionalScale}px`
+                  }}
+                >
+                  Card {i}
+                </div>
+              ))}
+            </div>
+            <p
+              style={{
+                margin: 0,
+                lineHeight: 1.7,
+                color: '#34495e',
+                fontSize: `${15 * proportionalScale}px`
+              }}
+            >
+              另一段示例文字：支持 Ctrl+滚轮缩放、触控板滚动等交互。勾选
+              MouseDragPan 后，
+              鼠标拖拽将用于平移画布，此时文字不可选中；取消勾选则恢复文字选择能力。
+              你也可以尝试缩放后选中不同大小的文字。
+            </p>
           </div>
         </VirtualPaper>
       </main>

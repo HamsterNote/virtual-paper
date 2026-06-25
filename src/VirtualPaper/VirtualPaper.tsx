@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 import type { CSSProperties } from 'react'
 import type {
   VirtualPaperProps,
@@ -9,23 +16,40 @@ import {
   VirtualPaperInitialPlacement,
   VirtualPaperInteractionMode,
   VirtualPaperRenderMode,
-  DEFAULT_ENABLED_INTERACTIONS
+  DEFAULT_ENABLED_INTERACTIONS,
+  READER_MODE_NATIVE_TOUCH_ACTION
 } from './types'
 import {
+  clampReaderTransform,
+  computeReaderLayoutMetrics,
+  convertLayoutToTransform,
+  convertTransformToLayout,
   getInitialTransform,
   serializeTransform,
   mergeDefaultTransform
 } from './transform'
+import { projectContainTransformForElements } from './containMode'
 import { useMultiDragInteractions } from './useMultiDragInteractions'
 import { useWheelInteractions } from './useWheelInteractions'
-import { useScrollGeometry } from './useScrollGeometry'
 import './VirtualPaper.css'
+
+/**
+ * 容差（px）：浏览器在 transform→scroll 回写时存在亚像素舍入，
+ * 导致 scrollLeft/scrollTop 与程序化目标有微小偏差。
+ * 若偏差在此范围内，scroll handler 视为程序化回写的回声（echo），
+ * 跳过 transform 更新，防止无限更新循环。
+ */
+const READER_PROGRAMMATIC_SCROLL_TOLERANCE_PX = 1
 
 export const VirtualPaper = ({
   children,
   enabledInteractions = DEFAULT_ENABLED_INTERACTIONS,
   initialPlacement = VirtualPaperInitialPlacement.Center,
-  renderMode = VirtualPaperRenderMode.Transform,
+  renderMode,
+  readerMode,
+  containMode = false,
+  edgeElasticScroll = false,
+  readerModeZoomDebounceMs,
   contentSize,
   transform: controlledTransform,
   defaultTransform,
@@ -41,16 +65,55 @@ export const VirtualPaper = ({
   containerProps
 }: VirtualPaperProps) => {
   const wrapperRef = useRef<HTMLDivElement>(null)
-  // transform 模式：containerRef 指向应用 transform 的 container（同时是 user-visible 层）
-  // scroll 模式：containerRef 直接指向文档流 container，原生 scroll 会让 rect.left/top 等于 transform.x/y
   const containerRef = useRef<HTMLDivElement>(null)
+  const warnedMissingContentSizeRef = useRef(false)
+  const programmaticReaderScrollRef = useRef<{
+    left: number
+    top: number
+  } | null>(null)
   const isControlled = controlledTransform !== undefined
-  const isScrollMode = renderMode === VirtualPaperRenderMode.Scroll
+  // 兼容已废弃的 renderMode：显式 readerMode 优先。
+  const isReaderMode =
+    readerMode ?? renderMode === VirtualPaperRenderMode.Scroll
+  const isContainMode = containMode === true && !isReaderMode
+  const mouseDragEnabled = enabledInteractions.includes(
+    VirtualPaperInteractionMode.MouseDragPan
+  )
+  const contentWidth = contentSize?.width
+  const contentHeight = contentSize?.height
 
-  const [uncontrolledTransform, setUncontrolledTransform] = useState<VirtualPaperTransform>(() => {
-    const base = { x: 0, y: 0, scale: 1 }
-    return mergeDefaultTransform(base, defaultTransform, minScale, maxScale)
-  })
+  const [uncontrolledTransform, setUncontrolledTransform] =
+    useState<VirtualPaperTransform>(() => {
+      const base = { x: 0, y: 0, scale: 1 }
+      return mergeDefaultTransform(base, defaultTransform, minScale, maxScale)
+    })
+  const [containRevision, setContainRevision] = useState(0)
+  const [readerWrapperSize, setReaderWrapperSize] = useState<{
+    width: number
+    height: number
+  } | null>(null)
+  const [elasticActiveCount, setElasticActiveCount] = useState(0)
+  const elasticActive = elasticActiveCount > 0
+
+  const incrementElasticActive = useCallback(() => {
+    setElasticActiveCount((count) => count + 1)
+  }, [])
+  const decrementElasticActive = useCallback(() => {
+    setElasticActiveCount((count) => Math.max(0, count - 1))
+  }, [])
+
+  const projectForContain = useCallback(
+    (next: VirtualPaperTransform): VirtualPaperTransform => {
+      if (!isContainMode) return next
+
+      const wrapper = wrapperRef.current
+      const container = containerRef.current
+      if (!wrapper || !container) return next
+
+      return projectContainTransformForElements(next, wrapper, container)
+    },
+    [isContainMode]
+  )
 
   useLayoutEffect(() => {
     if (isControlled) return
@@ -70,11 +133,17 @@ export const VirtualPaper = ({
       containerHeight: containerRect.height
     })
 
-    const merged = mergeDefaultTransform(initial, defaultTransform, minScale, maxScale)
-    setUncontrolledTransform(merged)
+    const merged = mergeDefaultTransform(
+      initial,
+      defaultTransform,
+      minScale,
+      maxScale
+    )
+    const projected = projectForContain(merged)
+    setUncontrolledTransform(projected)
 
     if (onTransformChange) {
-      onTransformChange(merged, {
+      onTransformChange(projected, {
         source: 'initialPlacement',
         inputType: 'programmatic',
         phase: 'change'
@@ -83,89 +152,195 @@ export const VirtualPaper = ({
   }, [])
 
   const transform = isControlled ? controlledTransform : uncontrolledTransform
+  const displayTransform = useMemo(() => {
+    void containRevision
+    const renderElasticTransform =
+      isContainMode && edgeElasticScroll && elasticActive
+    if (renderElasticTransform) return transform
+    return isContainMode ? projectForContain(transform) : transform
+  }, [
+    containRevision,
+    edgeElasticScroll,
+    isContainMode,
+    projectForContain,
+    transform,
+    elasticActive
+  ])
 
-  const updateTransform = useCallback((
-    next: VirtualPaperTransform,
-    meta: VirtualPaperTransformMeta
-  ) => {
-    if (!isControlled) {
-      setUncontrolledTransform(next)
-    }
-    if (onTransformChange) {
-      onTransformChange(next, meta)
-    }
-  }, [isControlled, onTransformChange])
-
-  const endTransform = useCallback((
-    next: VirtualPaperTransform,
-    meta: VirtualPaperTransformMeta
-  ) => {
-    if (!isControlled) {
-      setUncontrolledTransform(next)
-    }
-    if (onTransformChangeEnd) {
-      onTransformChangeEnd(next, meta)
-    }
-  }, [isControlled, onTransformChangeEnd])
-
-  const transformStyle = useMemo(() => serializeTransform(transform), [transform])
-
-  // scroll 模式：解析内容基础尺寸（contentSize prop 优先）
-  const { baseSize: scrollBaseSize } = useScrollGeometry({
-    enabled: isScrollMode,
-    contentSize
-  })
-
-  // scroll 模式：transform 变化（zoom/drag/controlled prop）→ 原生滚动位置
-  // 原生 scroll 只能表示 transform.x/y <= 0，正向 transform 会被钳制到 scroll 0。
   useLayoutEffect(() => {
-    if (!isScrollMode) return
+    if (!isContainMode || isReaderMode) return
+
+    const wrapper = wrapperRef.current
+    const container = containerRef.current
+    if (!wrapper || !container) return
+
+    const bumpContainRevision = () => {
+      setContainRevision((revision) => revision + 1)
+    }
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(bumpContainRevision)
+      observer.observe(wrapper)
+      observer.observe(container)
+      bumpContainRevision()
+      return () => observer.disconnect()
+    }
+
+    bumpContainRevision()
+    window.addEventListener('resize', bumpContainRevision)
+    return () => window.removeEventListener('resize', bumpContainRevision)
+  }, [isContainMode, isReaderMode])
+
+  const updateTransform = useCallback(
+    (next: VirtualPaperTransform, meta: VirtualPaperTransformMeta) => {
+      if (!isControlled) {
+        setUncontrolledTransform(next)
+      }
+      if (onTransformChange) {
+        onTransformChange(next, meta)
+      }
+    },
+    [isControlled, onTransformChange]
+  )
+
+  const endTransform = useCallback(
+    (next: VirtualPaperTransform, meta: VirtualPaperTransformMeta) => {
+      if (!isControlled) {
+        setUncontrolledTransform(next)
+      }
+      if (onTransformChangeEnd) {
+        onTransformChangeEnd(next, meta)
+      }
+    },
+    [isControlled, onTransformChangeEnd]
+  )
+
+  const transformStyle = useMemo(
+    () => serializeTransform(displayTransform),
+    [displayTransform]
+  )
+
+  const getReaderContentSize = useCallback(() => {
+    const wrapper = wrapperRef.current
+
+    if (contentWidth !== undefined && contentHeight !== undefined) {
+      return { width: contentWidth, height: contentHeight }
+    }
+
+    if (isReaderMode && !warnedMissingContentSizeRef.current) {
+      warnedMissingContentSizeRef.current = true
+      console.warn(
+        'VirtualPaper: readerMode requires contentSize to compute native scroll geometry. ' +
+          'Falling back to wrapper dimensions; scaling and scrolling may not behave as expected.'
+      )
+    }
+
+    return {
+      width: wrapper?.clientWidth ?? 0,
+      height: wrapper?.clientHeight ?? 0
+    }
+  }, [contentHeight, contentWidth, isReaderMode])
+
+  useLayoutEffect(() => {
+    if (!isReaderMode) return
     const wrapper = wrapperRef.current
     if (!wrapper) return
-    const targetLeft = Math.max(0, Math.round(-transform.x))
-    const targetTop = Math.max(0, Math.round(-transform.y))
+    const nextWidth = wrapper.clientWidth
+    const nextHeight = wrapper.clientHeight
+    setReaderWrapperSize((prev) => {
+      if (prev && prev.width === nextWidth && prev.height === nextHeight)
+        return prev
+      return { width: nextWidth, height: nextHeight }
+    })
+  }, [isReaderMode])
+
+  useLayoutEffect(() => {
+    if (!isReaderMode) return
+    const wrapper = wrapperRef.current
+    if (!wrapper) return
+    const wrapperWidth = wrapper.clientWidth
+    const wrapperHeight = wrapper.clientHeight
+
+    const readerLayout = convertTransformToLayout(
+      transform,
+      getReaderContentSize(),
+      wrapperWidth,
+      wrapperHeight
+    )
+    const targetLeft = Math.max(0, Math.round(readerLayout.scrollLeft))
+    const targetTop = Math.max(0, Math.round(readerLayout.scrollTop))
+    const shouldUpdateScroll =
+      wrapper.scrollLeft !== targetLeft || wrapper.scrollTop !== targetTop
+
+    if (shouldUpdateScroll) {
+      // 标记本次滚动来自 transform -> native scroll 的同步，避免 scroll 事件再回写 transform。
+      programmaticReaderScrollRef.current = { left: targetLeft, top: targetTop }
+    }
     if (wrapper.scrollLeft !== targetLeft) {
       wrapper.scrollLeft = targetLeft
     }
     if (wrapper.scrollTop !== targetTop) {
       wrapper.scrollTop = targetTop
     }
-  }, [isScrollMode, transform.x, transform.y])
+  }, [getReaderContentSize, isReaderMode, transform])
 
   // 用 ref 持有最新 transform，避免 scroll handler 闭包过期。
   // 场景：滚动期间触发 ctrl+wheel 缩放时，闭包里的 transform.scale 会过期，
   // 后续 scroll 事件会用 stale scale 覆盖最新值，导致缩放被回退。
   const transformRef = useRef(transform)
-  useEffect(() => {
+  useLayoutEffect(() => {
     transformRef.current = transform
   }, [transform])
 
-  // scroll 模式：原生滚动位置 → transform state。
-  // 写 scroll 后触发的 scroll 事件会因值相等 bail out，避免同步循环。
-  // 依赖只放 isScrollMode + updateTransform，scroll handler 通过 transformRef 读最新值。
   useEffect(() => {
-    if (!isScrollMode) return
+    if (!isReaderMode) return
     const wrapper = wrapperRef.current
     if (!wrapper) return
 
     const handleScroll = () => {
+      const programmaticScroll = programmaticReaderScrollRef.current
+      if (programmaticScroll) {
+        programmaticReaderScrollRef.current = null
+        if (
+          Math.abs(wrapper.scrollLeft - programmaticScroll.left) <=
+            READER_PROGRAMMATIC_SCROLL_TOLERANCE_PX &&
+          Math.abs(wrapper.scrollTop - programmaticScroll.top) <=
+            READER_PROGRAMMATIC_SCROLL_TOLERANCE_PX
+        )
+          return
+      }
+
       const currentTransform = transformRef.current
-      const newX = -wrapper.scrollLeft
-      const newY = -wrapper.scrollTop
-      if (currentTransform.x === newX && currentTransform.y === newY) return
-      updateTransform(
-        { ...currentTransform, x: newX, y: newY },
-        {
-          source: VirtualPaperInteractionMode.TrackpadScrollPan,
-          inputType: 'wheel',
-          phase: 'change'
-        }
+      const readerContentSize = getReaderContentSize()
+      const layoutTransform = convertLayoutToTransform(
+        readerContentSize.width * currentTransform.scale,
+        readerContentSize.height * currentTransform.scale,
+        wrapper.scrollLeft,
+        wrapper.scrollTop,
+        currentTransform.scale
       )
+      const nextTransform = clampReaderTransform(
+        layoutTransform,
+        readerContentSize,
+        wrapper.clientWidth,
+        wrapper.clientHeight
+      )
+      if (
+        currentTransform.x === nextTransform.x &&
+        currentTransform.y === nextTransform.y &&
+        currentTransform.scale === nextTransform.scale
+      )
+        return
+      updateTransform(nextTransform, {
+        source: VirtualPaperInteractionMode.TrackpadScrollPan,
+        inputType: 'wheel',
+        phase: 'change'
+      })
     }
 
     wrapper.addEventListener('scroll', handleScroll, { passive: true })
     return () => wrapper.removeEventListener('scroll', handleScroll)
-  }, [isScrollMode, updateTransform])
+  }, [getReaderContentSize, isReaderMode, updateTransform])
 
   const baseWrapperStyle = {
     position: 'relative',
@@ -178,8 +353,7 @@ export const VirtualPaper = ({
     position: 'absolute',
     transformOrigin: '0 0',
     willChange: 'transform',
-    touchAction: 'none',
-    userSelect: 'none'
+    touchAction: 'none'
   } as const
 
   const {
@@ -194,20 +368,30 @@ export const VirtualPaper = ({
     ...restContainerProps
   } = containerProps ?? {}
 
-  const wrapperDataTestId = ((wrapperProps as Record<string, unknown> | undefined)?.['data-testid'] as string | undefined) ?? 'virtual-paper-wrapper'
-  const containerDataTestId = ((containerProps as Record<string, unknown> | undefined)?.['data-testid'] as string | undefined) ?? 'virtual-paper-container'
+  const wrapperDataTestId =
+    ((wrapperProps as Record<string, unknown> | undefined)?.['data-testid'] as
+      | string
+      | undefined) ?? 'virtual-paper-wrapper'
+  const containerDataTestId =
+    ((containerProps as Record<string, unknown> | undefined)?.[
+      'data-testid'
+    ] as string | undefined) ?? 'virtual-paper-container'
 
   const wrapperClassNames = [
     'virtual-paper-wrapper',
     className,
     wrapperPropsClassName
-  ].filter(Boolean).join(' ')
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   const containerClassNames = [
     'virtual-paper-container',
     containerClassName,
     containerPropsClassName
-  ].filter(Boolean).join(' ')
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   const wrapperStyles = {
     ...baseWrapperStyle,
@@ -215,8 +399,14 @@ export const VirtualPaper = ({
     ...wrapperPropsStyle
   }
 
+  const containerUserSelect = (mouseDragEnabled ? 'none' : 'text') as
+    | 'none'
+    | 'text'
+
   const containerStyles = {
     ...baseContainerStyle,
+    userSelect: containerUserSelect,
+    WebkitUserSelect: containerUserSelect,
     ...containerStyle,
     ...containerPropsStyle,
     transform: transformStyle,
@@ -226,55 +416,69 @@ export const VirtualPaper = ({
   useMultiDragInteractions({
     wrapperRef,
     containerRef,
-    transform,
+    transform: displayTransform,
     enabledInteractions,
     minScale,
     maxScale,
+    contentSize,
     updateTransform,
-    endTransform
+    endTransform,
+    isReaderMode,
+    containMode: isContainMode,
+    edgeElasticScroll,
+    incrementElasticActive,
+    decrementElasticActive,
+    readerModeZoomDebounceMs
   })
 
   useWheelInteractions({
     wrapperRef,
     containerRef,
-    transform,
+    transform: displayTransform,
     enabledInteractions,
     minScale,
     maxScale,
+    contentSize,
     updateTransform,
     endTransform,
-    isScrollMode
+    isReaderMode,
+    containMode: isContainMode,
+    edgeElasticScroll,
+    incrementElasticActive,
+    decrementElasticActive,
+    readerModeZoomDebounceMs
   })
 
-  // --- 渲染分支 ---
-  // Transform 模式（默认）：单层 container，CSS transform: translate3d + scale 驱动平移+缩放
-  // Scroll 模式：2 层 wrapper(overflow:auto) > container(文档流宽高缩放)
-  if (isScrollMode) {
-    const scaledWidth = scrollBaseSize.width > 0
-      ? scrollBaseSize.width * transform.scale
-      : 'auto'
-    const scaledHeight = scrollBaseSize.height > 0
-      ? scrollBaseSize.height * transform.scale
-      : 'auto'
+  if (isReaderMode) {
+    const wrapper = wrapperRef.current
+    const measuredWidth = readerWrapperSize?.width ?? wrapper?.clientWidth ?? 0
+    const measuredHeight =
+      readerWrapperSize?.height ?? wrapper?.clientHeight ?? 0
+    const readerContentSize = getReaderContentSize()
+    const readerMetrics = computeReaderLayoutMetrics(
+      readerContentSize,
+      transform.scale,
+      measuredWidth,
+      measuredHeight,
+      transform
+    )
 
-    const scrollWrapperStyles: CSSProperties = {
+    const readerWrapperStyles: CSSProperties = {
       ...baseWrapperStyle,
       overflow: 'auto',
-      touchAction: 'none',
       ...style,
       ...wrapperPropsStyle
     }
-    // 注意：scroll 模式下 width/height 由 scale * contentSize 决定，是渲染模式的内在属性，
-    // 不允许被用户的 containerStyle/containerPropsStyle 覆盖（否则缩放失效）。
-    // 因此 scaled 尺寸必须放在 spread 之后，确保最高优先级。
-    const scrollContainerStyles: CSSProperties = {
+    const readerContainerStyles: CSSProperties = {
       position: 'relative',
-      touchAction: 'none',
+      touchAction: READER_MODE_NATIVE_TOUCH_ACTION,
       userSelect: 'none',
       ...containerStyle,
       ...containerPropsStyle,
-      width: scaledWidth,
-      height: scaledHeight
+      width: readerMetrics.width,
+      height: readerMetrics.height,
+      marginLeft: readerMetrics.offsetX,
+      marginTop: readerMetrics.offsetY
     }
     return (
       <div
@@ -282,14 +486,14 @@ export const VirtualPaper = ({
         ref={wrapperRef}
         data-testid={wrapperDataTestId}
         className={wrapperClassNames}
-        style={scrollWrapperStyles}
+        style={readerWrapperStyles}
       >
         <div
           {...restContainerProps}
           ref={containerRef}
           data-testid={containerDataTestId}
           className={containerClassNames}
-          style={scrollContainerStyles}
+          style={readerContainerStyles}
         >
           {children}
         </div>

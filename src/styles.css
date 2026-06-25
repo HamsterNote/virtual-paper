@@ -50,6 +50,7 @@ button {
   flex-direction: column;
   gap: 24px;
   padding: 24px;
+  max-height: 100vh;
   overflow-y: auto;
   border-right: 1px solid rgba(37, 35, 31, 0.12);
   background: rgba(255, 252, 244, 0.9);
@@ -142,14 +143,15 @@ button {
   flex: 1 1 auto;
   position: relative;
   min-width: 0;
+  height: 100vh;
+  max-height: 100vh;
   overflow: hidden;
 }
 
 /* ---- Transform readout ---- */
 
 [data-testid='transform-readout'] {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.82rem;
   font-weight: 700;
   word-break: break-all;

@@ -38,10 +38,7 @@ async function waitForTransformChange(
     .toBe(true)
 }
 
-async function expectTransformReadout(
-  page: Page,
-  expected: TransformReadout
-) {
+async function expectTransformReadout(page: Page, expected: TransformReadout) {
   await expect
     .poll(async () => {
       const current = await readTransform(page)
@@ -158,10 +155,9 @@ test.describe('VirtualPaper Browser Gestures', () => {
       .dispatchEvent('wheel', { deltaX: 0, deltaY: 0 })
 
     await expectTransformReadout(page, { x: 120, y: 80, scale: 1.5 })
-    await expect(page.locator('[data-testid="virtual-paper-container"]')).toHaveCSS(
-      'transform',
-      'matrix(1.5, 0, 0, 1.5, 120, 80)'
-    )
+    await expect(
+      page.locator('[data-testid="virtual-paper-container"]')
+    ).toHaveCSS('transform', 'matrix(1.5, 0, 0, 1.5, 120, 80)')
 
     await saveEvidence(page, 'task-9-controlled-mode.png')
   })

@@ -17,11 +17,10 @@ export enum VirtualPaperInitialPlacement {
 }
 
 /**
- * 渲染模式（独立于交互模式 InteractionMode 的维度）。
- *
- * - Transform：默认。用 CSS `transform: translate3d + scale` 驱动平移与缩放。
- * - Scroll：用改变 container 宽高来表示 scale、改变 wrapper.scrollLeft/Top
- *   来表示 translate。适合需要原生 scroll 几何（如与其他滚动容器联动）的场景。
+ * @deprecated Use `readerMode` instead. `VirtualPaperRenderMode.Scroll` maps to
+ * `readerMode = true`, and `VirtualPaperRenderMode.Transform` maps to the default
+ * transform-based rendering. This enum is kept for backward compatibility and will
+ * be removed in a future major version.
  */
 export enum VirtualPaperRenderMode {
   Transform = 'Transform',
@@ -31,10 +30,10 @@ export enum VirtualPaperRenderMode {
 export type VirtualPaperTransform = { x: number; y: number; scale: number }
 
 /**
- * scroll 模式下内容的未缩放基础尺寸。
+ * reader 模式下内容的未缩放基础尺寸。
  *
- * scroll 模式必须知道内容的原始尺寸才能计算 container 的宽高（= 基础 × scale）。
- * 必须由调用方显式提供：未提供时 baseSize 退化为 0×0，container 宽高为 'auto'，
+ * reader 模式必须知道内容的原始尺寸才能计算 container 的宽高（= 基础 × scale）。
+ * 必须由调用方显式提供：未提供时退化为 wrapper 尺寸，
  * 缩放与原生滚动几何将不会按预期工作。
  */
 export type VirtualPaperContentSize = { width: number; height: number }
@@ -55,17 +54,34 @@ export type VirtualPaperProps = {
   enabledInteractions?: VirtualPaperInteractionMode[]
   initialPlacement?: VirtualPaperInitialPlacement
   /**
-   * 渲染模式。默认 Transform（CSS transform）。
-   * Scroll 模式用 container 宽高 + wrapper scroll 几何实现相同的 pan/zoom 语义。
-   * 两种模式下 {x,y,scale} 状态语义完全一致，运行时切换会平滑保留状态。
+   * reader 模式下内容的未缩放基础尺寸。
+   */
+  contentSize?: VirtualPaperContentSize
+  /**
+   * @deprecated Use `readerMode` instead. `VirtualPaperRenderMode.Scroll` is
+   * equivalent to `readerMode = true`, and `VirtualPaperRenderMode.Transform`
+   * is equivalent to the default transform-based rendering. When both are
+   * provided, `readerMode` takes precedence.
    */
   renderMode?: VirtualPaperRenderMode
   /**
-   * scroll 模式下内容的未缩放基础尺寸。
-   * 必须显式提供：未提供时 container 宽高为 'auto'，缩放将无法工作。
-   * 仅在 renderMode === Scroll 时生效。
+   * 阅读模式。默认 false。
+   * 开启后使用原生滚动几何，适合文档阅读、PDF 阅读等场景。
    */
-  contentSize?: VirtualPaperContentSize
+  readerMode?: boolean
+  /**
+   * 非阅读模式下启用 contain 约束；默认 false。readerMode 为 true 时忽略。
+   */
+  containMode?: boolean
+  /**
+   * 启用边缘弹性滚动；默认 false。这里只暴露 API 开关，具体行为由交互 hook 决定。
+   */
+  edgeElasticScroll?: boolean
+  /**
+   * 阅读模式下的缩放防抖时间（毫秒）。
+   * 默认 500ms。仅在 readerMode 为 true 时生效。
+   */
+  readerModeZoomDebounceMs?: number
   transform?: VirtualPaperTransform
   defaultTransform?: Partial<VirtualPaperTransform>
   minScale?: number
@@ -98,14 +114,34 @@ export type UseVirtualPaperInteractionArgs = {
   enabledInteractions: VirtualPaperInteractionMode[]
   minScale: number
   maxScale: number
+  contentSize?: VirtualPaperContentSize
   updateTransform: VirtualPaperTransformUpdater
   endTransform: VirtualPaperTransformUpdater
   /**
-   * scroll 渲染模式下为 true。
-   * wheel hook 在 scroll 模式下：非 ctrl/meta 的 wheel 交给原生滚动（不 preventDefault），
-   * 仅 ctrl/meta + wheel 触发 JS zoom。
+   * 阅读模式下为 true。
    */
-  isScrollMode?: boolean
+  isReaderMode?: boolean
+  /**
+   * 非阅读模式下启用 contain 约束；默认 false。isReaderMode 为 true 时忽略。
+   */
+  containMode?: boolean
+  /**
+   * 启用边缘弹性滚动；默认 false。
+   */
+  edgeElasticScroll?: boolean
+  /**
+   * 标记一次弹性交互开始。每个调用必须对应一次 `decrementElasticActive`。
+   */
+  incrementElasticActive?: () => void
+  /**
+   * 标记一次弹性交互结束。必须与之前的 `incrementElasticActive` 配对调用。
+   */
+  decrementElasticActive?: () => void
+  /**
+   * 阅读模式下的缩放防抖时间（毫秒）。
+   * 默认 500ms。仅在 isReaderMode 为 true 时生效。
+   */
+  readerModeZoomDebounceMs?: number
 }
 
 export const DEFAULT_ENABLED_INTERACTIONS = [
@@ -114,3 +150,5 @@ export const DEFAULT_ENABLED_INTERACTIONS = [
   VirtualPaperInteractionMode.TouchSingleFingerPan,
   VirtualPaperInteractionMode.TouchTwoFingerZoom
 ]
+
+export const READER_MODE_NATIVE_TOUCH_ACTION = 'pan-x pan-y'
