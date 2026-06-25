@@ -3,9 +3,14 @@ import { projectContainTransform } from './transform'
 
 const MIN_SAFE_RECT_SCALE = 0.01
 
-const getMeasuredSize = (layoutSize: number, rectSize: number, scale: number): number => {
+const getMeasuredSize = (
+  layoutSize: number,
+  rectSize: number,
+  scale: number
+): number => {
   if (layoutSize > 0) return layoutSize
-  if (rectSize <= 0 || !Number.isFinite(scale) || scale < MIN_SAFE_RECT_SCALE) return 0
+  if (rectSize <= 0 || !Number.isFinite(scale) || scale < MIN_SAFE_RECT_SCALE)
+    return 0
   return rectSize / scale
 }
 
@@ -24,16 +29,35 @@ export function measureContainBox(
   containerWidth: number
   containerHeight: number
 } | null {
-  const wrapperWidth = wrapper.clientWidth || wrapper.getBoundingClientRect().width
-  const wrapperHeight = wrapper.clientHeight || wrapper.getBoundingClientRect().height
+  const wrapperWidth =
+    wrapper.clientWidth || wrapper.getBoundingClientRect().width
+  const wrapperHeight =
+    wrapper.clientHeight || wrapper.getBoundingClientRect().height
   const containerRect = container.getBoundingClientRect()
 
-  const containerWidth = getMeasuredSize(container.offsetWidth, containerRect.width, scale)
-  const containerHeight = getMeasuredSize(container.offsetHeight, containerRect.height, scale)
+  const containerWidth = getMeasuredSize(
+    container.offsetWidth,
+    containerRect.width,
+    scale
+  )
+  const containerHeight = getMeasuredSize(
+    container.offsetHeight,
+    containerRect.height,
+    scale
+  )
 
-  if (![wrapperWidth, wrapperHeight, containerWidth, containerHeight].every(Number.isFinite))
+  if (
+    ![wrapperWidth, wrapperHeight, containerWidth, containerHeight].every(
+      Number.isFinite
+    )
+  )
     return null
-  if (wrapperWidth <= 0 || wrapperHeight <= 0 || containerWidth <= 0 || containerHeight <= 0)
+  if (
+    wrapperWidth <= 0 ||
+    wrapperHeight <= 0 ||
+    containerWidth <= 0 ||
+    containerHeight <= 0
+  )
     return null
 
   return { wrapperWidth, wrapperHeight, containerWidth, containerHeight }

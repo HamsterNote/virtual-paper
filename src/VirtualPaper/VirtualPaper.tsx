@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 import type { CSSProperties } from 'react'
 import type {
   VirtualPaperProps,
@@ -8,6 +15,7 @@ import type {
 import {
   VirtualPaperInitialPlacement,
   VirtualPaperInteractionMode,
+  VirtualPaperRenderMode,
   DEFAULT_ENABLED_INTERACTIONS,
   READER_MODE_NATIVE_TOUCH_ACTION
 } from './types'
@@ -37,9 +45,9 @@ export const VirtualPaper = ({
   children,
   enabledInteractions = DEFAULT_ENABLED_INTERACTIONS,
   initialPlacement = VirtualPaperInitialPlacement.Center,
-  readerMode = false,
+  renderMode,
+  readerMode,
   containMode = false,
-  inertialScroll = false,
   edgeElasticScroll = false,
   readerModeZoomDebounceMs,
   contentSize,
@@ -58,32 +66,54 @@ export const VirtualPaper = ({
 }: VirtualPaperProps) => {
   const wrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const elasticActiveRef = useRef(false)
   const warnedMissingContentSizeRef = useRef(false)
-  const programmaticReaderScrollRef = useRef<{ left: number; top: number } | null>(null)
+  const programmaticReaderScrollRef = useRef<{
+    left: number
+    top: number
+  } | null>(null)
   const isControlled = controlledTransform !== undefined
-  const isReaderMode = readerMode === true
+  // 兼容已废弃的 renderMode：显式 readerMode 优先。
+  const isReaderMode =
+    readerMode ?? renderMode === VirtualPaperRenderMode.Scroll
   const isContainMode = containMode === true && !isReaderMode
-  const mouseDragEnabled = enabledInteractions.includes(VirtualPaperInteractionMode.MouseDragPan)
+  const mouseDragEnabled = enabledInteractions.includes(
+    VirtualPaperInteractionMode.MouseDragPan
+  )
   const contentWidth = contentSize?.width
   const contentHeight = contentSize?.height
 
-  const [uncontrolledTransform, setUncontrolledTransform] = useState<VirtualPaperTransform>(() => {
-    const base = { x: 0, y: 0, scale: 1 }
-    return mergeDefaultTransform(base, defaultTransform, minScale, maxScale)
-  })
+  const [uncontrolledTransform, setUncontrolledTransform] =
+    useState<VirtualPaperTransform>(() => {
+      const base = { x: 0, y: 0, scale: 1 }
+      return mergeDefaultTransform(base, defaultTransform, minScale, maxScale)
+    })
   const [containRevision, setContainRevision] = useState(0)
-  const [readerWrapperSize, setReaderWrapperSize] = useState<{ width: number; height: number } | null>(null)
+  const [readerWrapperSize, setReaderWrapperSize] = useState<{
+    width: number
+    height: number
+  } | null>(null)
+  const [elasticActiveCount, setElasticActiveCount] = useState(0)
+  const elasticActive = elasticActiveCount > 0
 
-  const projectForContain = useCallback((next: VirtualPaperTransform): VirtualPaperTransform => {
-    if (!isContainMode) return next
+  const incrementElasticActive = useCallback(() => {
+    setElasticActiveCount((count) => count + 1)
+  }, [])
+  const decrementElasticActive = useCallback(() => {
+    setElasticActiveCount((count) => Math.max(0, count - 1))
+  }, [])
 
-    const wrapper = wrapperRef.current
-    const container = containerRef.current
-    if (!wrapper || !container) return next
+  const projectForContain = useCallback(
+    (next: VirtualPaperTransform): VirtualPaperTransform => {
+      if (!isContainMode) return next
 
-    return projectContainTransformForElements(next, wrapper, container)
-  }, [isContainMode])
+      const wrapper = wrapperRef.current
+      const container = containerRef.current
+      if (!wrapper || !container) return next
+
+      return projectContainTransformForElements(next, wrapper, container)
+    },
+    [isContainMode]
+  )
 
   useLayoutEffect(() => {
     if (isControlled) return
@@ -103,7 +133,12 @@ export const VirtualPaper = ({
       containerHeight: containerRect.height
     })
 
-    const merged = mergeDefaultTransform(initial, defaultTransform, minScale, maxScale)
+    const merged = mergeDefaultTransform(
+      initial,
+      defaultTransform,
+      minScale,
+      maxScale
+    )
     const projected = projectForContain(merged)
     setUncontrolledTransform(projected)
 
@@ -119,10 +154,18 @@ export const VirtualPaper = ({
   const transform = isControlled ? controlledTransform : uncontrolledTransform
   const displayTransform = useMemo(() => {
     void containRevision
-    const renderElasticTransform = isContainMode && edgeElasticScroll && elasticActiveRef.current
+    const renderElasticTransform =
+      isContainMode && edgeElasticScroll && elasticActive
     if (renderElasticTransform) return transform
     return isContainMode ? projectForContain(transform) : transform
-  }, [containRevision, edgeElasticScroll, isContainMode, projectForContain, transform])
+  }, [
+    containRevision,
+    edgeElasticScroll,
+    isContainMode,
+    projectForContain,
+    transform,
+    elasticActive
+  ])
 
   useLayoutEffect(() => {
     if (!isContainMode || isReaderMode) return
@@ -148,31 +191,34 @@ export const VirtualPaper = ({
     return () => window.removeEventListener('resize', bumpContainRevision)
   }, [isContainMode, isReaderMode])
 
-  const updateTransform = useCallback((
-    next: VirtualPaperTransform,
-    meta: VirtualPaperTransformMeta
-  ) => {
-    if (!isControlled) {
-      setUncontrolledTransform(next)
-    }
-    if (onTransformChange) {
-      onTransformChange(next, meta)
-    }
-  }, [isControlled, onTransformChange])
+  const updateTransform = useCallback(
+    (next: VirtualPaperTransform, meta: VirtualPaperTransformMeta) => {
+      if (!isControlled) {
+        setUncontrolledTransform(next)
+      }
+      if (onTransformChange) {
+        onTransformChange(next, meta)
+      }
+    },
+    [isControlled, onTransformChange]
+  )
 
-  const endTransform = useCallback((
-    next: VirtualPaperTransform,
-    meta: VirtualPaperTransformMeta
-  ) => {
-    if (!isControlled) {
-      setUncontrolledTransform(next)
-    }
-    if (onTransformChangeEnd) {
-      onTransformChangeEnd(next, meta)
-    }
-  }, [isControlled, onTransformChangeEnd])
+  const endTransform = useCallback(
+    (next: VirtualPaperTransform, meta: VirtualPaperTransformMeta) => {
+      if (!isControlled) {
+        setUncontrolledTransform(next)
+      }
+      if (onTransformChangeEnd) {
+        onTransformChangeEnd(next, meta)
+      }
+    },
+    [isControlled, onTransformChangeEnd]
+  )
 
-  const transformStyle = useMemo(() => serializeTransform(displayTransform), [displayTransform])
+  const transformStyle = useMemo(
+    () => serializeTransform(displayTransform),
+    [displayTransform]
+  )
 
   const getReaderContentSize = useCallback(() => {
     const wrapper = wrapperRef.current
@@ -198,10 +244,11 @@ export const VirtualPaper = ({
     const nextWidth = wrapper.clientWidth
     const nextHeight = wrapper.clientHeight
     setReaderWrapperSize((prev) => {
-      if (prev && prev.width === nextWidth && prev.height === nextHeight) return prev
+      if (prev && prev.width === nextWidth && prev.height === nextHeight)
+        return prev
       return { width: nextWidth, height: nextHeight }
     })
-  })
+  }, [isReaderMode])
 
   useLayoutEffect(() => {
     if (!isReaderMode) return
@@ -251,9 +298,12 @@ export const VirtualPaper = ({
       if (programmaticScroll) {
         programmaticReaderScrollRef.current = null
         if (
-          Math.abs(wrapper.scrollLeft - programmaticScroll.left) <= READER_PROGRAMMATIC_SCROLL_TOLERANCE_PX &&
-          Math.abs(wrapper.scrollTop - programmaticScroll.top) <= READER_PROGRAMMATIC_SCROLL_TOLERANCE_PX
-        ) return
+          Math.abs(wrapper.scrollLeft - programmaticScroll.left) <=
+            READER_PROGRAMMATIC_SCROLL_TOLERANCE_PX &&
+          Math.abs(wrapper.scrollTop - programmaticScroll.top) <=
+            READER_PROGRAMMATIC_SCROLL_TOLERANCE_PX
+        )
+          return
       }
 
       const currentTransform = transformRef.current
@@ -275,15 +325,13 @@ export const VirtualPaper = ({
         currentTransform.x === nextTransform.x &&
         currentTransform.y === nextTransform.y &&
         currentTransform.scale === nextTransform.scale
-      ) return
-      updateTransform(
-        nextTransform,
-        {
-          source: VirtualPaperInteractionMode.TrackpadScrollPan,
-          inputType: 'wheel',
-          phase: 'change'
-        }
       )
+        return
+      updateTransform(nextTransform, {
+        source: VirtualPaperInteractionMode.TrackpadScrollPan,
+        inputType: 'wheel',
+        phase: 'change'
+      })
     }
 
     wrapper.addEventListener('scroll', handleScroll, { passive: true })
@@ -316,20 +364,30 @@ export const VirtualPaper = ({
     ...restContainerProps
   } = containerProps ?? {}
 
-  const wrapperDataTestId = ((wrapperProps as Record<string, unknown> | undefined)?.['data-testid'] as string | undefined) ?? 'virtual-paper-wrapper'
-  const containerDataTestId = ((containerProps as Record<string, unknown> | undefined)?.['data-testid'] as string | undefined) ?? 'virtual-paper-container'
+  const wrapperDataTestId =
+    ((wrapperProps as Record<string, unknown> | undefined)?.['data-testid'] as
+      | string
+      | undefined) ?? 'virtual-paper-wrapper'
+  const containerDataTestId =
+    ((containerProps as Record<string, unknown> | undefined)?.[
+      'data-testid'
+    ] as string | undefined) ?? 'virtual-paper-container'
 
   const wrapperClassNames = [
     'virtual-paper-wrapper',
     className,
     wrapperPropsClassName
-  ].filter(Boolean).join(' ')
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   const containerClassNames = [
     'virtual-paper-container',
     containerClassName,
     containerPropsClassName
-  ].filter(Boolean).join(' ')
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   const wrapperStyles = {
     ...baseWrapperStyle,
@@ -337,7 +395,9 @@ export const VirtualPaper = ({
     ...wrapperPropsStyle
   }
 
-  const containerUserSelect = (mouseDragEnabled ? 'none' : 'text') as 'none' | 'text'
+  const containerUserSelect = (mouseDragEnabled ? 'none' : 'text') as
+    | 'none'
+    | 'text'
 
   const containerStyles = {
     ...baseContainerStyle,
@@ -361,9 +421,9 @@ export const VirtualPaper = ({
     endTransform,
     isReaderMode,
     containMode: isContainMode,
-    inertialScroll,
     edgeElasticScroll,
-    elasticActiveRef,
+    incrementElasticActive,
+    decrementElasticActive,
     readerModeZoomDebounceMs
   })
 
@@ -379,16 +439,17 @@ export const VirtualPaper = ({
     endTransform,
     isReaderMode,
     containMode: isContainMode,
-    inertialScroll,
     edgeElasticScroll,
-    elasticActiveRef,
+    incrementElasticActive,
+    decrementElasticActive,
     readerModeZoomDebounceMs
   })
 
   if (isReaderMode) {
     const wrapper = wrapperRef.current
     const measuredWidth = readerWrapperSize?.width ?? wrapper?.clientWidth ?? 0
-    const measuredHeight = readerWrapperSize?.height ?? wrapper?.clientHeight ?? 0
+    const measuredHeight =
+      readerWrapperSize?.height ?? wrapper?.clientHeight ?? 0
     const readerContentSize = getReaderContentSize()
     const readerMetrics = computeReaderLayoutMetrics(
       readerContentSize,

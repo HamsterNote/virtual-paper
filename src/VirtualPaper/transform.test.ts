@@ -272,7 +272,11 @@ describe('computeReaderLayoutMetrics', () => {
       Number.POSITIVE_INFINITY,
       0,
       Number.NaN,
-      { x: Number.NaN, y: Number.NEGATIVE_INFINITY, scale: Number.POSITIVE_INFINITY }
+      {
+        x: Number.NaN,
+        y: Number.NEGATIVE_INFINITY,
+        scale: Number.POSITIVE_INFINITY
+      }
     )
 
     expect(result.width).toBe(0)
@@ -364,7 +368,12 @@ describe('reader transform/layout conversion roundtrip', () => {
     const transform = { x: -300, y: -250, scale: 1 }
 
     // When: transform is projected to native layout and then back to reader transform.
-    const layout = convertTransformToLayout(transform, contentSize, wrapperWidth, wrapperHeight)
+    const layout = convertTransformToLayout(
+      transform,
+      contentSize,
+      wrapperWidth,
+      wrapperHeight
+    )
     const roundtrip = convertReaderLayoutToTransform(
       contentSize,
       transform.scale,
@@ -400,7 +409,12 @@ describe('reader transform/layout conversion roundtrip', () => {
     const transform = { x: -250, y: -999, scale: 1 }
 
     // When: conversion goes transform -> native scroll -> reader transform.
-    const layout = convertTransformToLayout(transform, contentSize, wrapperWidth, wrapperHeight)
+    const layout = convertTransformToLayout(
+      transform,
+      contentSize,
+      wrapperWidth,
+      wrapperHeight
+    )
     const roundtrip = convertReaderLayoutToTransform(
       contentSize,
       transform.scale,
@@ -434,7 +448,12 @@ describe('reader transform/layout conversion roundtrip', () => {
     const transform = { x: -999, y: -125, scale: 1 }
 
     // When: conversion goes transform -> native scroll -> reader transform.
-    const layout = convertTransformToLayout(transform, contentSize, wrapperWidth, wrapperHeight)
+    const layout = convertTransformToLayout(
+      transform,
+      contentSize,
+      wrapperWidth,
+      wrapperHeight
+    )
     const roundtrip = convertReaderLayoutToTransform(
       contentSize,
       transform.scale,
@@ -468,7 +487,12 @@ describe('reader transform/layout conversion roundtrip', () => {
     const transform = { x: -250, y: -125, scale: 1 }
 
     // When: conversion goes transform -> native scroll -> reader transform.
-    const layout = convertTransformToLayout(transform, contentSize, wrapperWidth, wrapperHeight)
+    const layout = convertTransformToLayout(
+      transform,
+      contentSize,
+      wrapperWidth,
+      wrapperHeight
+    )
     const roundtrip = convertReaderLayoutToTransform(
       contentSize,
       transform.scale,
@@ -607,17 +631,36 @@ describe('projectContainTransform', () => {
   it('returns original offset for zero/negative wrapper and container dimensions', () => {
     const transform = { x: -42, y: 99, scale: 1 }
     // wrapperWidth=0 → projectContainAxis returns desiredOffset
-    expect(projectContainTransform(transform, { width: 100, height: 100 }, 0, 600).x).toBe(-42)
+    expect(
+      projectContainTransform(transform, { width: 100, height: 100 }, 0, 600).x
+    ).toBe(-42)
     // containerWidth=-1 → projectContainAxis returns desiredOffset
-    expect(projectContainTransform(transform, { width: -1, height: 100 }, 800, 600).x).toBe(-42)
+    expect(
+      projectContainTransform(transform, { width: -1, height: 100 }, 800, 600).x
+    ).toBe(-42)
     // scale=0 → projectContainAxis returns desiredOffset
     expect(
-      projectContainTransform({ x: -42, y: 99, scale: 0 }, { width: 100, height: 100 }, 800, 600).x
+      projectContainTransform(
+        { x: -42, y: 99, scale: 0 },
+        { width: 100, height: 100 },
+        800,
+        600
+      ).x
     ).toBe(-42)
     // NaN in wrapperHeight → returns desiredOffset
-    expect(projectContainTransform(transform, { width: 100, height: 100 }, 800, NaN).y).toBe(99)
+    expect(
+      projectContainTransform(transform, { width: 100, height: 100 }, 800, NaN)
+        .y
+    ).toBe(99)
     // Infinity in containerWidth → returns desiredOffset
-    expect(projectContainTransform(transform, { width: Infinity, height: 100 }, 800, 600).x).toBe(-42)
+    expect(
+      projectContainTransform(
+        transform,
+        { width: Infinity, height: 100 },
+        800,
+        600
+      ).x
+    ).toBe(-42)
     // 全部无效 → 原样返回，不会产生 NaN
     const bad = projectContainTransform(
       { x: 0, y: 0, scale: NaN },
@@ -646,7 +689,12 @@ describe('applyElasticContainResistance', () => {
     // Then: in-range values pass through and the settle target stays the hard projection.
     expect(result.elasticTransform).toEqual(desiredTransform)
     expect(result.targetTransform).toEqual(
-      projectContainTransform(desiredTransform, { width: 1200, height: 900 }, 800, 600)
+      projectContainTransform(
+        desiredTransform,
+        { width: 1200, height: 900 },
+        800,
+        600
+      )
     )
   })
 

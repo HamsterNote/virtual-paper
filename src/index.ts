@@ -8,5 +8,6 @@ export type {
 export {
   VirtualPaperInteractionMode,
   VirtualPaperInitialPlacement,
+  VirtualPaperRenderMode,
   DEFAULT_ENABLED_INTERACTIONS
 } from './VirtualPaper/types'

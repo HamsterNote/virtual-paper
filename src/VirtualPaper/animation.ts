@@ -1,85 +1,62 @@
 import type { VirtualPaperTransform } from './types'
 
-type SpringAnimationOptions = {
+type EaseAnimationOptions = {
   readonly from: VirtualPaperTransform
   readonly to: VirtualPaperTransform
+  readonly duration?: number
   readonly onUpdate: (transform: VirtualPaperTransform) => void
   readonly onComplete?: () => void
 }
 
-type SpringVector = {
-  readonly x: number
-  readonly y: number
-  readonly scale: number
+/** easeOutCubic: 快速启动、缓慢结束的缓动函数 */
+const easeOutCubic = (t: number): number => {
+  const inv = 1 - t
+  return 1 - inv * inv * inv
 }
 
-const SPRING_STIFFNESS = 0.18
-const SPRING_DAMPING = 0.72
-const SPRING_REST_DELTA = 0.25
-const SPRING_REST_VELOCITY = 0.25
+const lerp = (from: number, to: number, progress: number): number =>
+  from + (to - from) * progress
 
-const getAxisDistance = (from: VirtualPaperTransform, to: VirtualPaperTransform): SpringVector => ({
-  x: Math.abs(from.x - to.x),
-  y: Math.abs(from.y - to.y),
-  scale: Math.abs(from.scale - to.scale)
-})
-
-const isSpringAtRest = (
-  current: VirtualPaperTransform,
-  target: VirtualPaperTransform,
-  velocity: SpringVector
-): boolean => {
-  const distance = getAxisDistance(current, target)
-
-  return distance.x <= SPRING_REST_DELTA &&
-    distance.y <= SPRING_REST_DELTA &&
-    distance.scale <= SPRING_REST_DELTA &&
-    Math.abs(velocity.x) <= SPRING_REST_VELOCITY &&
-    Math.abs(velocity.y) <= SPRING_REST_VELOCITY &&
-    Math.abs(velocity.scale) <= SPRING_REST_VELOCITY
-}
-
-export const createSpringAnimation = ({
+/**
+ * 创建基于时间的缓动动画。
+ * 使用 easeOutCubic 实现单调收敛，不产生过冲或振荡。
+ *
+ * @returns cancel 函数 — 调用后立即停止动画，不再触发 onUpdate / onComplete。
+ */
+export const createEaseAnimation = ({
   from,
   to,
+  duration = 220,
   onUpdate,
   onComplete
-}: SpringAnimationOptions): (() => void) => {
-  let current = from
-  let velocity: SpringVector = { x: 0, y: 0, scale: 0 }
+}: EaseAnimationOptions): (() => void) => {
   let frameId: number | null = null
   let cancelled = false
-
-  const finish = () => {
-    onUpdate(to)
-    onComplete?.()
-  }
+  let frameCount = 0
 
   const step = () => {
     if (cancelled) return
 
-    const nextVelocity = {
-      x: (velocity.x + (to.x - current.x) * SPRING_STIFFNESS) * SPRING_DAMPING,
-      y: (velocity.y + (to.y - current.y) * SPRING_STIFFNESS) * SPRING_DAMPING,
-      scale: (velocity.scale + (to.scale - current.scale) * SPRING_STIFFNESS) * SPRING_DAMPING
-    }
-    const next = {
-      x: current.x + nextVelocity.x,
-      y: current.y + nextVelocity.y,
-      scale: current.scale + nextVelocity.scale
-    }
+    frameCount++
+    const elapsed = frameCount * 16
+    const raw = elapsed / duration
+    const t = raw >= 1 ? 1 : easeOutCubic(raw)
 
-    current = next
-    velocity = nextVelocity
+    onUpdate({
+      x: lerp(from.x, to.x, t),
+      y: lerp(from.y, to.y, t),
+      scale: lerp(from.scale, to.scale, t)
+    })
 
-    if (isSpringAtRest(current, to, velocity)) {
-      finish()
+    if (t >= 1) {
+      onComplete?.()
       return
     }
 
-    onUpdate(current)
     frameId = window.requestAnimationFrame(step)
   }
+
+  onUpdate(from)
 
   frameId = window.requestAnimationFrame(step)
 
@@ -91,3 +68,9 @@ export const createSpringAnimation = ({
     }
   }
 }
+
+/**
+ * @deprecated 使用 `createEaseAnimation` 替代。
+ * 保留此别名以兼容现有导入，行为已改为 ease 缓动。
+ */
+export const createSpringAnimation = createEaseAnimation

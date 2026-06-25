@@ -12,7 +12,9 @@ test.describe('contain mode', () => {
     await page.goto('/')
   })
 
-  test('fitted content centers after enabling contain mode', async ({ page }) => {
+  test('fitted content centers after enabling contain mode', async ({
+    page
+  }) => {
     // 启用 contain mode，内容默认 600×400 在更大的 wrapper 内属于 fitted
     await page.locator('[data-testid="contain-mode-toggle"]').check()
     // 触发一次微小的 wheel 事件，让 hook 有机会将投影后的 transform 写回 readout
@@ -45,7 +47,9 @@ test.describe('contain mode', () => {
     await saveEvidence(page, 'task-7-contain-center.png')
   })
 
-  test('oversized content cannot be panned to leave horizontal/vertical blank space', async ({ page }) => {
+  test('oversized content cannot be panned to leave horizontal/vertical blank space', async ({
+    page
+  }) => {
     await page.locator('[data-testid="contain-mode-toggle"]').check()
 
     const wrapper = page.locator('[data-testid="virtual-paper-wrapper"]')
@@ -98,7 +102,9 @@ test.describe('contain mode', () => {
     await saveEvidence(page, 'task-7-contain-pan-clamp.png')
   })
 
-  test('ctrl-wheel zoom projects fitted axis to center after scaling', async ({ page }) => {
+  test('ctrl-wheel zoom projects fitted axis to center after scaling', async ({
+    page
+  }) => {
     // 使用一个较高的视口，使得放大后水平溢出、垂直仍 fitted
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/')
@@ -158,7 +164,9 @@ test.describe('contain mode', () => {
     await saveEvidence(page, 'task-7-contain-zoom.png')
   })
 
-  test('reader mode with contain toggle still behaves like reader mode', async ({ page }) => {
+  test('reader mode with contain toggle still behaves like reader mode', async ({
+    page
+  }) => {
     // 先启用阅读模式
     await page.locator('[data-testid="reader-mode-toggle"]').check()
     await page.waitForTimeout(100)

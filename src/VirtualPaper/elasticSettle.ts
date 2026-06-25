@@ -1,24 +1,32 @@
 import type { MutableRefObject } from 'react'
 
-import { createSpringAnimation } from './animation'
-import type { VirtualPaperTransform, VirtualPaperTransformMeta, VirtualPaperTransformUpdater } from './types'
+import { createEaseAnimation } from './animation'
+import type {
+  VirtualPaperTransform,
+  VirtualPaperTransformMeta,
+  VirtualPaperTransformUpdater
+} from './types'
 
 type ElasticSettleEndMeta = Omit<VirtualPaperTransformMeta, 'phase'> & {
   readonly phase: 'end'
 }
 
 type ElasticSettleControllerRefs = {
-  readonly elasticActiveRefRef: MutableRefObject<MutableRefObject<boolean> | undefined>
   readonly settleCancelRef: MutableRefObject<(() => void) | null>
   readonly updateTransformRef: MutableRefObject<VirtualPaperTransformUpdater>
   readonly endTransformRef: MutableRefObject<VirtualPaperTransformUpdater>
+  readonly incrementElasticActive: () => void
+  readonly decrementElasticActive: () => void
   readonly emitInitialUpdate?: boolean
 }
 
 export type ElasticSettleController = {
   readonly setElasticActive: (active: boolean) => void
   readonly cancelSettleAnimation: () => void
-  readonly transformsMatch: (first: VirtualPaperTransform, second: VirtualPaperTransform) => boolean
+  readonly transformsMatch: (
+    first: VirtualPaperTransform,
+    second: VirtualPaperTransform
+  ) => boolean
   readonly settleElasticTransform: (
     from: VirtualPaperTransform,
     to: VirtualPaperTransform,
@@ -27,30 +35,42 @@ export type ElasticSettleController = {
 }
 
 export const createElasticSettleController = ({
-  elasticActiveRefRef,
   settleCancelRef,
   updateTransformRef,
   endTransformRef,
+  incrementElasticActive,
+  decrementElasticActive,
   emitInitialUpdate = true
 }: ElasticSettleControllerRefs): ElasticSettleController => {
-  const setElasticActive = (active: boolean) => {
-    const activeRef = elasticActiveRefRef.current
-    if (activeRef) {
-      activeRef.current = active
+  // 跟踪当前 controller 是否处于弹性活跃状态，确保 increment/decrement 成对出现，
+  // 避免多个 controller 共享同一个全局计数器时出现重复计数或漏减。
+  let isElasticActive = false
+
+  const markElasticActive = (active: boolean) => {
+    if (active === isElasticActive) return
+    isElasticActive = active
+    if (active) {
+      incrementElasticActive()
+    } else {
+      decrementElasticActive()
     }
   }
 
   const cancelSettleAnimation = () => {
     settleCancelRef.current?.()
     settleCancelRef.current = null
-    setElasticActive(false)
+    markElasticActive(false)
   }
 
   const transformsMatch = (
     first: VirtualPaperTransform,
     second: VirtualPaperTransform
   ): boolean => {
-    return first.x === second.x && first.y === second.y && first.scale === second.scale
+    return (
+      first.x === second.x &&
+      first.y === second.y &&
+      first.scale === second.scale
+    )
   }
 
   const settleElasticTransform = (
@@ -66,11 +86,11 @@ export const createElasticSettleController = ({
     }
 
     const changeMeta = { ...endMeta, phase: 'change' as const }
-    setElasticActive(true)
+    markElasticActive(true)
     if (emitInitialUpdate) {
       updateTransformRef.current(from, changeMeta)
     }
-    settleCancelRef.current = createSpringAnimation({
+    settleCancelRef.current = createEaseAnimation({
       from,
       to,
       onUpdate(next) {
@@ -78,14 +98,14 @@ export const createElasticSettleController = ({
       },
       onComplete() {
         settleCancelRef.current = null
-        setElasticActive(false)
+        markElasticActive(false)
         endTransformRef.current(to, endMeta)
       }
     })
   }
 
   return {
-    setElasticActive,
+    setElasticActive: markElasticActive,
     cancelSettleAnimation,
     transformsMatch,
     settleElasticTransform

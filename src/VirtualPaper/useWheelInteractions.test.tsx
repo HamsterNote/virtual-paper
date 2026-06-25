@@ -50,6 +50,7 @@ function WheelHarness({
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const localElasticActiveRef = useRef(false)
+  const activeRef = elasticActiveRef ?? localElasticActiveRef
   const [transform, setTransform] = useState(initialTransform)
 
   useWheelInteractions({
@@ -68,7 +69,12 @@ function WheelHarness({
     isReaderMode,
     containMode,
     edgeElasticScroll,
-    elasticActiveRef: elasticActiveRef ?? localElasticActiveRef,
+    incrementElasticActive: () => {
+      activeRef.current = true
+    },
+    decrementElasticActive: () => {
+      activeRef.current = false
+    },
     readerModeZoomDebounceMs
   })
 
@@ -85,19 +91,20 @@ function WheelHarness({
   )
 }
 
-const createRect = (left: number, top: number): DOMRect => ({
-  width: 800,
-  height: 600,
-  top,
-  left,
-  right: left + 800,
-  bottom: top + 600,
-  x: left,
-  y: top,
-  toJSON() {
-    return this
-  }
-}) as unknown as DOMRect
+const createRect = (left: number, top: number): DOMRect =>
+  ({
+    width: 800,
+    height: 600,
+    top,
+    left,
+    right: left + 800,
+    bottom: top + 600,
+    x: left,
+    y: top,
+    toJSON() {
+      return this
+    }
+  }) as unknown as DOMRect
 
 const dispatchWheel = (wrapper: HTMLElement, options: WheelEventInit) => {
   const event = new WheelEvent('wheel', {
@@ -126,10 +133,22 @@ const mockMeasurements = (
   wrapperSize: { width: number; height: number },
   containerSize: { width: number; height: number }
 ) => {
-  Object.defineProperty(wrapper, 'clientWidth', { value: wrapperSize.width, configurable: true })
-  Object.defineProperty(wrapper, 'clientHeight', { value: wrapperSize.height, configurable: true })
-  Object.defineProperty(container, 'offsetWidth', { value: containerSize.width, configurable: true })
-  Object.defineProperty(container, 'offsetHeight', { value: containerSize.height, configurable: true })
+  Object.defineProperty(wrapper, 'clientWidth', {
+    value: wrapperSize.width,
+    configurable: true
+  })
+  Object.defineProperty(wrapper, 'clientHeight', {
+    value: wrapperSize.height,
+    configurable: true
+  })
+  Object.defineProperty(container, 'offsetWidth', {
+    value: containerSize.width,
+    configurable: true
+  })
+  Object.defineProperty(container, 'offsetHeight', {
+    value: containerSize.height,
+    configurable: true
+  })
 }
 
 const wrapperSize = { width: 800, height: 600 }
@@ -235,7 +254,10 @@ describe('useWheelInteractions', () => {
   }
 
   it('attaches a non-passive wheel listener to the wrapper element', () => {
-    const addEventListener = vi.spyOn(HTMLDivElement.prototype, 'addEventListener')
+    const addEventListener = vi.spyOn(
+      HTMLDivElement.prototype,
+      'addEventListener'
+    )
 
     render(
       <WheelHarness
@@ -245,7 +267,11 @@ describe('useWheelInteractions', () => {
 
     const hasNonPassiveWheelListener = addEventListener.mock.calls.some(
       ([type, , options]) => {
-        if (type !== 'wheel' || typeof options !== 'object' || options === null) {
+        if (
+          type !== 'wheel' ||
+          typeof options !== 'object' ||
+          options === null
+        ) {
           return false
         }
 
@@ -280,7 +306,10 @@ describe('useWheelInteractions', () => {
         phase: 'change'
       }
     )
-    expect(screen.getByTestId('wheel-container')).toHaveAttribute('data-scale', '1')
+    expect(screen.getByTestId('wheel-container')).toHaveAttribute(
+      'data-scale',
+      '1'
+    )
   })
 
   it('does not consume wheel pan when TrackpadScrollPan is disabled', () => {
@@ -288,16 +317,25 @@ describe('useWheelInteractions', () => {
 
     render(<WheelHarness enabledInteractions={[]} onUpdate={onUpdate} />)
 
-    const { preventDefault } = dispatchWheel(screen.getByTestId('wheel-wrapper'), {
-      deltaX: 40,
-      deltaY: 25,
-      ctrlKey: false
-    })
+    const { preventDefault } = dispatchWheel(
+      screen.getByTestId('wheel-wrapper'),
+      {
+        deltaX: 40,
+        deltaY: 25,
+        ctrlKey: false
+      }
+    )
 
     expect(onUpdate).not.toHaveBeenCalled()
     expect(preventDefault).not.toHaveBeenCalled()
-    expect(screen.getByTestId('wheel-container')).toHaveAttribute('data-x', '10')
-    expect(screen.getByTestId('wheel-container')).toHaveAttribute('data-y', '20')
+    expect(screen.getByTestId('wheel-container')).toHaveAttribute(
+      'data-x',
+      '10'
+    )
+    expect(screen.getByTestId('wheel-container')).toHaveAttribute(
+      'data-y',
+      '20'
+    )
   })
 
   it('zooms in with ctrl wheel and keeps the cursor anchor stable', () => {
@@ -385,10 +423,13 @@ describe('useWheelInteractions', () => {
       />
     )
 
-    const { preventDefault } = dispatchWheel(screen.getByTestId('wheel-wrapper'), {
-      deltaX: 40,
-      deltaY: 25
-    })
+    const { preventDefault } = dispatchWheel(
+      screen.getByTestId('wheel-wrapper'),
+      {
+        deltaX: 40,
+        deltaY: 25
+      }
+    )
 
     expect(preventDefault).toHaveBeenCalledTimes(1)
   })
@@ -441,11 +482,14 @@ describe('useWheelInteractions', () => {
       />
     )
 
-    const { preventDefault } = dispatchWheel(screen.getByTestId('wheel-wrapper'), {
-      deltaX: 40,
-      deltaY: 25,
-      ctrlKey: false
-    })
+    const { preventDefault } = dispatchWheel(
+      screen.getByTestId('wheel-wrapper'),
+      {
+        deltaX: 40,
+        deltaY: 25,
+        ctrlKey: false
+      }
+    )
 
     expect(onUpdate).not.toHaveBeenCalled()
     expect(preventDefault).not.toHaveBeenCalled()
@@ -468,11 +512,14 @@ describe('useWheelInteractions', () => {
       />
     )
 
-    const { preventDefault } = dispatchWheel(screen.getByTestId('wheel-wrapper'), {
-      deltaX: -1000,
-      deltaY: -700,
-      ctrlKey: false
-    })
+    const { preventDefault } = dispatchWheel(
+      screen.getByTestId('wheel-wrapper'),
+      {
+        deltaX: -1000,
+        deltaY: -700,
+        ctrlKey: false
+      }
+    )
 
     expect(onUpdate).not.toHaveBeenCalled()
     expect(onEnd).not.toHaveBeenCalled()
@@ -492,10 +539,13 @@ describe('useWheelInteractions', () => {
       />
     )
 
-    const { preventDefault } = dispatchWheel(screen.getByTestId('wheel-wrapper'), {
-      deltaY: -100,
-      ctrlKey: true
-    })
+    const { preventDefault } = dispatchWheel(
+      screen.getByTestId('wheel-wrapper'),
+      {
+        deltaY: -100,
+        ctrlKey: true
+      }
+    )
 
     expect(onUpdate).toHaveBeenCalledTimes(1)
     expect(preventDefault).toHaveBeenCalledTimes(1)
@@ -654,8 +704,16 @@ describe('useWheelInteractions', () => {
     const onUpdate = vi.fn()
     const contentSize = { width: 400, height: 300 }
     const initialTransform = { x: 0, y: 0, scale: 1 }
-    const wrapper = renderReaderZoomHarness({ contentSize, initialTransform, onUpdate })
-    const before = getReaderContentPoint(initialTransform, contentSize, wrapperCenter)
+    const wrapper = renderReaderZoomHarness({
+      contentSize,
+      initialTransform,
+      onUpdate
+    })
+    const before = getReaderContentPoint(
+      initialTransform,
+      contentSize,
+      wrapperCenter
+    )
 
     dispatchWheel(wrapper, {
       clientX: 410,
@@ -674,8 +732,16 @@ describe('useWheelInteractions', () => {
     const onUpdate = vi.fn()
     const contentSize = { width: 700, height: 300 }
     const initialTransform = { x: 0, y: 0, scale: 1 }
-    const wrapper = renderReaderZoomHarness({ contentSize, initialTransform, onUpdate })
-    const before = getReaderContentPoint(initialTransform, contentSize, wrapperCenter)
+    const wrapper = renderReaderZoomHarness({
+      contentSize,
+      initialTransform,
+      onUpdate
+    })
+    const before = getReaderContentPoint(
+      initialTransform,
+      contentSize,
+      wrapperCenter
+    )
 
     dispatchWheel(wrapper, {
       clientX: 410,
@@ -696,8 +762,16 @@ describe('useWheelInteractions', () => {
     const onUpdate = vi.fn()
     const contentSize = { width: 1200, height: 900 }
     const initialTransform = { x: -200, y: -150, scale: 1 }
-    const wrapper = renderReaderZoomHarness({ contentSize, initialTransform, onUpdate })
-    const before = getReaderContentPoint(initialTransform, contentSize, wrapperCenter)
+    const wrapper = renderReaderZoomHarness({
+      contentSize,
+      initialTransform,
+      onUpdate
+    })
+    const before = getReaderContentPoint(
+      initialTransform,
+      contentSize,
+      wrapperCenter
+    )
 
     dispatchWheel(wrapper, {
       clientX: 410,
@@ -716,8 +790,16 @@ describe('useWheelInteractions', () => {
     const onUpdate = vi.fn()
     const contentSize = { width: 1000, height: 300 }
     const initialTransform = { x: -100, y: 0, scale: 1 }
-    const wrapper = renderReaderZoomHarness({ contentSize, initialTransform, onUpdate })
-    const before = getReaderContentPoint(initialTransform, contentSize, wrapperCenter)
+    const wrapper = renderReaderZoomHarness({
+      contentSize,
+      initialTransform,
+      onUpdate
+    })
+    const before = getReaderContentPoint(
+      initialTransform,
+      contentSize,
+      wrapperCenter
+    )
 
     dispatchWheel(wrapper, {
       clientX: 410,
@@ -738,7 +820,11 @@ describe('useWheelInteractions', () => {
     const onUpdate = vi.fn()
     const contentSize = { width: 700, height: 300 }
     const initialTransform = { x: 0, y: 0, scale: 1 }
-    const wrapper = renderReaderZoomHarness({ contentSize, initialTransform, onUpdate })
+    const wrapper = renderReaderZoomHarness({
+      contentSize,
+      initialTransform,
+      onUpdate
+    })
 
     dispatchWheel(wrapper, {
       clientX: 410,
@@ -749,7 +835,8 @@ describe('useWheelInteractions', () => {
 
     const next = onUpdate.mock.calls[0][0] as VirtualPaperTransform
     const expectedScale = Math.exp(100 * 0.002)
-    const expectedScrollLeft = (contentSize.width / 2) * expectedScale - wrapperCenter.x
+    const expectedScrollLeft =
+      (contentSize.width / 2) * expectedScale - wrapperCenter.x
     const maxScrollLeft = contentSize.width * expectedScale - wrapperSize.width
 
     expect(next.x).toBeCloseTo(-expectedScrollLeft)
@@ -772,13 +859,20 @@ describe('useWheelInteractions', () => {
 
     const wrapper = screen.getByTestId('wheel-wrapper')
     const container = screen.getByTestId('wheel-container')
-    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 1200 })
+    mockMeasurements(
+      wrapper,
+      container,
+      { width: 800, height: 600 },
+      { width: 1600, height: 1200 }
+    )
 
     dispatchWheel(wrapper, { deltaX: -900, deltaY: -700, ctrlKey: false })
 
     expect(onUpdate).toHaveBeenCalledWith(
       { x: 0, y: 0, scale: 1 },
-      expect.objectContaining({ source: VirtualPaperInteractionMode.TrackpadScrollPan })
+      expect.objectContaining({
+        source: VirtualPaperInteractionMode.TrackpadScrollPan
+      })
     )
 
     onUpdate.mockClear()
@@ -787,7 +881,9 @@ describe('useWheelInteractions', () => {
 
     expect(onUpdate).toHaveBeenCalledWith(
       { x: -800, y: -600, scale: 1 },
-      expect.objectContaining({ source: VirtualPaperInteractionMode.TrackpadScrollPan })
+      expect.objectContaining({
+        source: VirtualPaperInteractionMode.TrackpadScrollPan
+      })
     )
   })
 
@@ -810,13 +906,21 @@ describe('useWheelInteractions', () => {
 
     const wrapper = screen.getByTestId('wheel-wrapper')
     const container = screen.getByTestId('wheel-container')
-    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 1200 })
+    mockMeasurements(
+      wrapper,
+      container,
+      { width: 800, height: 600 },
+      { width: 1600, height: 1200 }
+    )
 
     dispatchWheel(wrapper, { deltaX: -1000, deltaY: -700, ctrlKey: false })
 
     expect(onUpdate).toHaveBeenCalledWith(
       { x: 0, y: 0, scale: 1 },
-      expect.objectContaining({ source: VirtualPaperInteractionMode.TrackpadScrollPan, phase: 'change' })
+      expect.objectContaining({
+        source: VirtualPaperInteractionMode.TrackpadScrollPan,
+        phase: 'change'
+      })
     )
     expect(elasticActiveRef.current).toBe(false)
 
@@ -826,7 +930,10 @@ describe('useWheelInteractions', () => {
 
     expect(onEnd).toHaveBeenCalledWith(
       { x: 0, y: 0, scale: 1 },
-      expect.objectContaining({ source: VirtualPaperInteractionMode.TrackpadScrollPan, phase: 'end' })
+      expect.objectContaining({
+        source: VirtualPaperInteractionMode.TrackpadScrollPan,
+        phase: 'end'
+      })
     )
   })
 
@@ -847,22 +954,31 @@ describe('useWheelInteractions', () => {
 
     const wrapper = screen.getByTestId('wheel-wrapper')
     const container = screen.getByTestId('wheel-container')
-    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 1200 })
+    mockMeasurements(
+      wrapper,
+      container,
+      { width: 800, height: 600 },
+      { width: 1600, height: 1200 }
+    )
 
     dispatchWheel(wrapper, { deltaX: -1000, deltaY: -700, ctrlKey: false })
 
     expect(onUpdate).toHaveBeenCalledWith(
       { x: 0, y: 0, scale: 1 },
-      expect.objectContaining({ source: VirtualPaperInteractionMode.TrackpadScrollPan, phase: 'change' })
+      expect.objectContaining({
+        source: VirtualPaperInteractionMode.TrackpadScrollPan,
+        phase: 'change'
+      })
     )
     expect(elasticActiveRef.current).toBe(false)
   })
 
-  it('containMode: edge-elastic trackpad pan resists overscroll and settles after wheel debounce', () => {
+  it('containMode: edge-elastic trackpad pan hard-projects to bounds without elastic resistance or settle animation', () => {
     vi.useFakeTimers()
     const onUpdate = vi.fn()
     const onEnd = vi.fn()
     const elasticActiveRef = { current: false }
+    const { requestAnimationFrame } = installPausedAnimationFrame()
 
     render(
       <WheelHarness
@@ -878,66 +994,36 @@ describe('useWheelInteractions', () => {
 
     const wrapper = screen.getByTestId('wheel-wrapper')
     const container = screen.getByTestId('wheel-container')
-    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 1200 })
+    mockMeasurements(
+      wrapper,
+      container,
+      { width: 800, height: 600 },
+      { width: 1600, height: 1200 }
+    )
 
     dispatchWheel(wrapper, { deltaX: -1000, deltaY: -700, ctrlKey: false })
 
     expect(onUpdate).toHaveBeenCalledWith(
-      { x: 550, y: 385.00000000000006, scale: 1 },
-      expect.objectContaining({ source: VirtualPaperInteractionMode.TrackpadScrollPan, phase: 'change' })
+      { x: 0, y: 0, scale: 1 },
+      expect.objectContaining({
+        source: VirtualPaperInteractionMode.TrackpadScrollPan,
+        phase: 'change'
+      })
     )
-    expect(elasticActiveRef.current).toBe(true)
+    expect(elasticActiveRef.current).toBe(false)
+    expect(requestAnimationFrame).not.toHaveBeenCalled()
 
     act(() => {
       vi.advanceTimersByTime(150)
-      vi.advanceTimersByTime(2000)
     })
 
     expect(onEnd).toHaveBeenCalledWith(
       { x: 0, y: 0, scale: 1 },
-      expect.objectContaining({ source: VirtualPaperInteractionMode.TrackpadScrollPan, phase: 'end' })
+      expect.objectContaining({
+        source: VirtualPaperInteractionMode.TrackpadScrollPan,
+        phase: 'end'
+      })
     )
-    expect(elasticActiveRef.current).toBe(false)
-  })
-
-  it('containMode: edge-elastic settle is cancelled when TrackpadScrollPan is disabled', () => {
-    vi.useFakeTimers()
-    const onEnd = vi.fn()
-    const elasticActiveRef = { current: false }
-    const { rerender } = render(
-      <WheelHarness
-        enabledInteractions={[VirtualPaperInteractionMode.TrackpadScrollPan]}
-        initialTransform={{ x: 0, y: 0, scale: 1 }}
-        containMode
-        edgeElasticScroll
-        elasticActiveRef={elasticActiveRef}
-        onEnd={onEnd}
-      />
-    )
-
-    const wrapper = screen.getByTestId('wheel-wrapper')
-    const container = screen.getByTestId('wheel-container')
-    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 1200 })
-
-    dispatchWheel(wrapper, { deltaX: -1000, deltaY: -700, ctrlKey: false })
-    expect(elasticActiveRef.current).toBe(true)
-
-    rerender(
-      <WheelHarness
-        enabledInteractions={[]}
-        initialTransform={{ x: 0, y: 0, scale: 1 }}
-        containMode
-        edgeElasticScroll
-        elasticActiveRef={elasticActiveRef}
-        onEnd={onEnd}
-      />
-    )
-
-    act(() => {
-      vi.advanceTimersByTime(2150)
-    })
-
-    expect(onEnd).not.toHaveBeenCalled()
     expect(elasticActiveRef.current).toBe(false)
   })
 
@@ -959,7 +1045,12 @@ describe('useWheelInteractions', () => {
     )
     let wrapper = screen.getByTestId('wheel-wrapper')
     let container = screen.getByTestId('wheel-container')
-    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 1200 })
+    mockMeasurements(
+      wrapper,
+      container,
+      { width: 800, height: 600 },
+      { width: 1600, height: 1200 }
+    )
     dispatchWheel(wrapper, { deltaY: -100, ctrlKey: true })
 
     expect(ctrlUpdate).toHaveBeenCalledTimes(1)
@@ -979,7 +1070,12 @@ describe('useWheelInteractions', () => {
     )
     wrapper = screen.getByTestId('wheel-wrapper')
     container = screen.getByTestId('wheel-container')
-    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 1200 })
+    mockMeasurements(
+      wrapper,
+      container,
+      { width: 800, height: 600 },
+      { width: 1600, height: 1200 }
+    )
     dispatchWheel(wrapper, { deltaY: -100, ctrlKey: false })
 
     expect(wheelZoomUpdate).toHaveBeenCalledTimes(1)
@@ -1004,7 +1100,12 @@ describe('useWheelInteractions', () => {
 
     const wrapper = screen.getByTestId('wheel-wrapper')
     const container = screen.getByTestId('wheel-container')
-    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 1200 })
+    mockMeasurements(
+      wrapper,
+      container,
+      { width: 800, height: 600 },
+      { width: 1600, height: 1200 }
+    )
     dispatchWheel(wrapper, { deltaY: -100, metaKey: true })
 
     const next = onUpdate.mock.calls[0][0] as VirtualPaperTransform
@@ -1015,138 +1116,6 @@ describe('useWheelInteractions', () => {
       inputType: 'wheel',
       phase: 'change'
     })
-    expect(elasticActiveRef.current).toBe(false)
-  })
-
-  it('containMode: edge-elastic settle animation is cancelled on unmount', () => {
-    vi.useFakeTimers()
-    const onEnd = vi.fn()
-    const elasticActiveRef = { current: false }
-    const { requestAnimationFrame, cancelAnimationFrame } = installPausedAnimationFrame()
-    const { unmount } = render(
-      <WheelHarness
-        enabledInteractions={[VirtualPaperInteractionMode.TrackpadScrollPan]}
-        initialTransform={{ x: 0, y: 0, scale: 1 }}
-        containMode
-        edgeElasticScroll
-        elasticActiveRef={elasticActiveRef}
-        onEnd={onEnd}
-      />
-    )
-
-    const wrapper = screen.getByTestId('wheel-wrapper')
-    const container = screen.getByTestId('wheel-container')
-    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 1200 })
-
-    dispatchWheel(wrapper, { deltaX: -1000, deltaY: -700, ctrlKey: false })
-    act(() => {
-      vi.advanceTimersByTime(150)
-    })
-
-    expect(requestAnimationFrame).toHaveBeenCalledTimes(1)
-    expect(onEnd).not.toHaveBeenCalled()
-
-    unmount()
-    act(() => {
-      vi.advanceTimersByTime(2000)
-    })
-
-    expect(cancelAnimationFrame).toHaveBeenCalledTimes(1)
-    expect(onEnd).not.toHaveBeenCalled()
-    expect(elasticActiveRef.current).toBe(false)
-  })
-
-  it('containMode: edge-elastic settle animation is cancelled when the option turns off', () => {
-    vi.useFakeTimers()
-    const onEnd = vi.fn()
-    const elasticActiveRef = { current: false }
-    const { requestAnimationFrame, cancelAnimationFrame } = installPausedAnimationFrame()
-    const { rerender } = render(
-      <WheelHarness
-        enabledInteractions={[VirtualPaperInteractionMode.TrackpadScrollPan]}
-        initialTransform={{ x: 0, y: 0, scale: 1 }}
-        containMode
-        edgeElasticScroll
-        elasticActiveRef={elasticActiveRef}
-        onEnd={onEnd}
-      />
-    )
-
-    const wrapper = screen.getByTestId('wheel-wrapper')
-    const container = screen.getByTestId('wheel-container')
-    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 1200 })
-
-    dispatchWheel(wrapper, { deltaX: -1000, deltaY: -700, ctrlKey: false })
-    act(() => {
-      vi.advanceTimersByTime(150)
-    })
-
-    expect(requestAnimationFrame).toHaveBeenCalledTimes(1)
-    expect(onEnd).not.toHaveBeenCalled()
-
-    rerender(
-      <WheelHarness
-        enabledInteractions={[VirtualPaperInteractionMode.TrackpadScrollPan]}
-        initialTransform={{ x: 0, y: 0, scale: 1 }}
-        containMode
-        edgeElasticScroll={false}
-        elasticActiveRef={elasticActiveRef}
-        onEnd={onEnd}
-      />
-    )
-    act(() => {
-      vi.advanceTimersByTime(2000)
-    })
-
-    expect(cancelAnimationFrame).toHaveBeenCalledTimes(1)
-    expect(onEnd).not.toHaveBeenCalled()
-    expect(elasticActiveRef.current).toBe(false)
-  })
-
-  it('containMode: edge-elastic settle animation is cancelled when TrackpadScrollPan is disabled after settle starts', () => {
-    vi.useFakeTimers()
-    const onEnd = vi.fn()
-    const elasticActiveRef = { current: false }
-    const { requestAnimationFrame, cancelAnimationFrame } = installPausedAnimationFrame()
-    const { rerender } = render(
-      <WheelHarness
-        enabledInteractions={[VirtualPaperInteractionMode.TrackpadScrollPan]}
-        initialTransform={{ x: 0, y: 0, scale: 1 }}
-        containMode
-        edgeElasticScroll
-        elasticActiveRef={elasticActiveRef}
-        onEnd={onEnd}
-      />
-    )
-
-    const wrapper = screen.getByTestId('wheel-wrapper')
-    const container = screen.getByTestId('wheel-container')
-    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 1200 })
-
-    dispatchWheel(wrapper, { deltaX: -1000, deltaY: -700, ctrlKey: false })
-    act(() => {
-      vi.advanceTimersByTime(150)
-    })
-
-    expect(requestAnimationFrame).toHaveBeenCalledTimes(1)
-    expect(onEnd).not.toHaveBeenCalled()
-
-    rerender(
-      <WheelHarness
-        enabledInteractions={[]}
-        initialTransform={{ x: 0, y: 0, scale: 1 }}
-        containMode
-        edgeElasticScroll
-        elasticActiveRef={elasticActiveRef}
-        onEnd={onEnd}
-      />
-    )
-    act(() => {
-      vi.advanceTimersByTime(2000)
-    })
-
-    expect(cancelAnimationFrame).toHaveBeenCalledTimes(1)
-    expect(onEnd).not.toHaveBeenCalled()
     expect(elasticActiveRef.current).toBe(false)
   })
 
@@ -1164,7 +1133,12 @@ describe('useWheelInteractions', () => {
 
     const wrapper = screen.getByTestId('wheel-wrapper')
     const container = screen.getByTestId('wheel-container')
-    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 400, height: 300 })
+    mockMeasurements(
+      wrapper,
+      container,
+      { width: 800, height: 600 },
+      { width: 400, height: 300 }
+    )
 
     dispatchWheel(wrapper, { deltaY: -100, ctrlKey: true })
 
@@ -1192,7 +1166,12 @@ describe('useWheelInteractions', () => {
 
     const wrapper = screen.getByTestId('wheel-wrapper')
     const container = screen.getByTestId('wheel-container')
-    mockMeasurements(wrapper, container, { width: 800, height: 600 }, { width: 1600, height: 300 })
+    mockMeasurements(
+      wrapper,
+      container,
+      { width: 800, height: 600 },
+      { width: 1600, height: 300 }
+    )
 
     dispatchWheel(wrapper, { deltaY: -100, ctrlKey: true })
 

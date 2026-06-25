@@ -98,11 +98,13 @@ async function saveEvidence(page: Page, fileName: string) {
 }
 
 async function dispatchReaderWheel(page: Page, deltaY: number) {
-  await page.locator('[data-testid="virtual-paper-wrapper"]').dispatchEvent('wheel', {
-    ctrlKey: true,
-    ...WHEEL_ANCHOR_INSIDE_WRAPPER,
-    deltaY
-  })
+  await page
+    .locator('[data-testid="virtual-paper-wrapper"]')
+    .dispatchEvent('wheel', {
+      ctrlKey: true,
+      ...WHEEL_ANCHOR_INSIDE_WRAPPER,
+      deltaY
+    })
 }
 
 async function readReaderLayout(page: Page): Promise<ReaderLayoutSnapshot> {
@@ -150,7 +152,10 @@ async function readReaderLayout(page: Page): Promise<ReaderLayoutSnapshot> {
   return snapshot
 }
 
-async function contentPointUnderPointer(page: Page, pointer: Point): Promise<Point> {
+async function contentPointUnderPointer(
+  page: Page,
+  pointer: Point
+): Promise<Point> {
   const [layout, transform] = await Promise.all([
     readReaderLayout(page),
     readTransform(page)
@@ -354,8 +359,12 @@ test.describe('VirtualPaper readerMode', () => {
       y: layout.container.top + layout.container.height / 2
     }
 
-    expect(layout.container.width).toBeLessThanOrEqual(layout.wrapper.clientWidth)
-    expect(layout.container.height).toBeLessThanOrEqual(layout.wrapper.clientHeight)
+    expect(layout.container.width).toBeLessThanOrEqual(
+      layout.wrapper.clientWidth
+    )
+    expect(layout.container.height).toBeLessThanOrEqual(
+      layout.wrapper.clientHeight
+    )
     expect(layout.container.marginLeft).toBeGreaterThan(0)
     expect(layout.container.marginTop).toBeGreaterThan(0)
     expect(layout.wrapper.scrollLeft).toBe(0)
@@ -392,7 +401,10 @@ test.describe('VirtualPaper readerMode', () => {
 
     await wrapper.evaluate((el) => {
       const div = el as HTMLElement
-      div.scrollLeft = Math.max(1, Math.floor((div.scrollWidth - div.clientWidth) / 2))
+      div.scrollLeft = Math.max(
+        1,
+        Math.floor((div.scrollWidth - div.clientWidth) / 2)
+      )
       div.scrollTop = 0
     })
 
@@ -415,19 +427,27 @@ test.describe('VirtualPaper readerMode', () => {
       .toEqual({
         marginLeft: 0,
         marginTop: Math.round(mixedAxisLayout.container.marginTop),
-        scrollLeft: Math.round(mixedAxisLayout.wrapper.scrollWidth - mixedAxisLayout.wrapper.clientWidth) > 1
-          ? Math.max(
-              1,
-              Math.floor(
-                (mixedAxisLayout.wrapper.scrollWidth - mixedAxisLayout.wrapper.clientWidth) / 2
+        scrollLeft:
+          Math.round(
+            mixedAxisLayout.wrapper.scrollWidth -
+              mixedAxisLayout.wrapper.clientWidth
+          ) > 1
+            ? Math.max(
+                1,
+                Math.floor(
+                  (mixedAxisLayout.wrapper.scrollWidth -
+                    mixedAxisLayout.wrapper.clientWidth) /
+                    2
+                )
               )
-            )
-          : 1,
+            : 1,
         scrollTop: 0,
         x: -Math.max(
           1,
           Math.floor(
-            (mixedAxisLayout.wrapper.scrollWidth - mixedAxisLayout.wrapper.clientWidth) / 2
+            (mixedAxisLayout.wrapper.scrollWidth -
+              mixedAxisLayout.wrapper.clientWidth) /
+              2
           )
         ),
         y: 0
@@ -435,8 +455,12 @@ test.describe('VirtualPaper readerMode', () => {
 
     const scrolledLayout = await readReaderLayout(page)
     const scrolledTransform = await readTransform(page)
-    expect(scrolledLayout.wrapper.scrollLeft + Math.round(scrolledTransform.x)).toBe(0)
-    expect(scrolledLayout.wrapper.scrollTop + Math.round(scrolledTransform.y)).toBe(0)
+    expect(
+      scrolledLayout.wrapper.scrollLeft + Math.round(scrolledTransform.x)
+    ).toBe(0)
+    expect(
+      scrolledLayout.wrapper.scrollTop + Math.round(scrolledTransform.y)
+    ).toBe(0)
 
     await saveEvidence(page, 'reader-mode-overflow-scroll-round-trip.png')
   })
@@ -515,7 +539,9 @@ test.describe('VirtualPaper readerMode', () => {
   test('keeps default transform mode CSS transform and wheel pan behavior', async ({
     page
   }) => {
-    await expect(page.locator('[data-testid="reader-mode-toggle"]')).not.toBeChecked()
+    await expect(
+      page.locator('[data-testid="reader-mode-toggle"]')
+    ).not.toBeChecked()
 
     const wrapper = page.locator('[data-testid="virtual-paper-wrapper"]')
     const container = page.locator('[data-testid="virtual-paper-container"]')

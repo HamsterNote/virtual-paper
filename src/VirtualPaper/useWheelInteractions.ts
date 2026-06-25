@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 
 import {
-  applyElasticContainResistance,
   applyZoomAnchor,
   clampReaderTransform,
   clampScale,
@@ -9,7 +8,7 @@ import {
   convertReaderLayoutToTransform,
   validateReaderModeZoomDebounceMs
 } from './transform'
-import { measureContainBox, projectContainTransformForElements } from './containMode'
+import { projectContainTransformForElements } from './containMode'
 import { createElasticSettleController } from './elasticSettle'
 import {
   type VirtualPaperContentSize,
@@ -25,7 +24,6 @@ const WHEEL_ZOOM_SENSITIVITY = 0.002
 type WheelEndState = {
   transform: VirtualPaperTransform
   source: VirtualPaperInteractionMode
-  settleFrom?: VirtualPaperTransform
 }
 
 type ReaderWheelZoomTransformInput = {
@@ -82,8 +80,11 @@ const getReaderWheelZoomTransform = ({
     wrapperHeight,
     current
   )
-  const contentX = (currentMetrics.scrollLeft + localX - currentMetrics.offsetX) / current.scale
-  const contentY = (currentMetrics.scrollTop + localY - currentMetrics.offsetY) / current.scale
+  const contentX =
+    (currentMetrics.scrollLeft + localX - currentMetrics.offsetX) /
+    current.scale
+  const contentY =
+    (currentMetrics.scrollTop + localY - currentMetrics.offsetY) / current.scale
   const zoomFactor = Math.exp(-event.deltaY * WHEEL_ZOOM_SENSITIVITY)
   const nextScale = clampScale(current.scale * zoomFactor, minScale, maxScale)
   const nextMetrics = computeReaderLayoutMetrics(
@@ -114,32 +115,39 @@ const getReaderWheelZoomTransform = ({
   )
 }
 
-export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void {
+export function useWheelInteractions(
+  args: UseVirtualPaperInteractionArgs
+): void {
   const latestArgsRef = useRef(args)
   const wheelEndTimerRef = useRef<number | null>(null)
   const wheelEndStateRef = useRef<WheelEndState | null>(null)
   const settleCancelRef = useRef<(() => void) | null>(null)
-  const elasticActiveRefRef = useRef(args.elasticActiveRef)
+  const incrementElasticActiveRef = useRef(args.incrementElasticActive)
+  const decrementElasticActiveRef = useRef(args.decrementElasticActive)
   const updateTransformRef = useRef(args.updateTransform)
   const endTransformRef = useRef(args.endTransform)
 
   latestArgsRef.current = args
-  elasticActiveRefRef.current = args.elasticActiveRef
+  incrementElasticActiveRef.current = args.incrementElasticActive
+  decrementElasticActiveRef.current = args.decrementElasticActive
   updateTransformRef.current = args.updateTransform
   endTransformRef.current = args.endTransform
 
   const {
     setElasticActive,
-    cancelSettleAnimation,
-    transformsMatch,
-    settleElasticTransform
-  } = useMemo(() => createElasticSettleController({
-    elasticActiveRefRef,
-    settleCancelRef,
-    updateTransformRef,
-    endTransformRef,
-    emitInitialUpdate: false
-  }), [])
+    cancelSettleAnimation
+  } = useMemo(
+    () =>
+      createElasticSettleController({
+        settleCancelRef,
+        updateTransformRef,
+        endTransformRef,
+        incrementElasticActive: () => incrementElasticActiveRef.current?.(),
+        decrementElasticActive: () => decrementElasticActiveRef.current?.(),
+        emitInitialUpdate: false
+      }),
+    []
+  )
 
   const finishWheelTransform = useCallback(() => {
     const wheelEndState = wheelEndStateRef.current
@@ -153,26 +161,19 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
       inputType: 'wheel' as const,
       phase: 'end' as const
     }
-    if (wheelEndState.settleFrom && !transformsMatch(wheelEndState.settleFrom, wheelEndState.transform)) {
-      settleElasticTransform(wheelEndState.settleFrom, wheelEndState.transform, endMeta)
-    } else {
-      setElasticActive(false)
-      endTransformRef.current(wheelEndState.transform, endMeta)
-    }
+    setElasticActive(false)
+    endTransformRef.current(wheelEndState.transform, endMeta)
     wheelEndStateRef.current = null
     wheelEndTimerRef.current = null
-  }, [setElasticActive, settleElasticTransform, transformsMatch])
+  }, [setElasticActive])
 
   const scheduleWheelEnd = useCallback(
     (
       transform: VirtualPaperTransform,
       source: VirtualPaperInteractionMode,
-      debounceMs: number,
-      settleFrom?: VirtualPaperTransform
+      debounceMs: number
     ) => {
-      wheelEndStateRef.current = settleFrom
-        ? { transform, source, settleFrom }
-        : { transform, source }
+      wheelEndStateRef.current = { transform, source }
 
       if (wheelEndTimerRef.current !== null) {
         window.clearTimeout(wheelEndTimerRef.current)
@@ -183,7 +184,10 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
         return
       }
 
-      wheelEndTimerRef.current = window.setTimeout(finishWheelTransform, debounceMs)
+      wheelEndTimerRef.current = window.setTimeout(
+        finishWheelTransform,
+        debounceMs
+      )
     },
     [finishWheelTransform]
   )
@@ -201,7 +205,6 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
         updateTransform,
         isReaderMode,
         containMode,
-        edgeElasticScroll,
         readerModeZoomDebounceMs
       } = latestArgsRef.current
       const wrapper = wrapperRef.current
@@ -217,33 +220,42 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
       let source: VirtualPaperInteractionMode | null = null
 
       if (event.ctrlKey || event.metaKey) {
-        if (hasInteraction(VirtualPaperInteractionMode.MouseWheelCtrlZoom) && wrapper) {
+        if (
+          hasInteraction(VirtualPaperInteractionMode.MouseWheelCtrlZoom) &&
+          wrapper
+        ) {
           source = VirtualPaperInteractionMode.MouseWheelCtrlZoom
-          nextTransform = isReaderMode && contentSize
-            ? getReaderWheelZoomTransform({
-                event,
-                wrapper,
-                contentSize,
-                current: transform,
-                minScale,
-                maxScale
-              })
-            : getWheelZoomTransform(
-                event,
-                wrapper,
-                transform,
-                minScale,
-                maxScale
-              )
+          nextTransform =
+            isReaderMode && contentSize
+              ? getReaderWheelZoomTransform({
+                  event,
+                  wrapper,
+                  contentSize,
+                  current: transform,
+                  minScale,
+                  maxScale
+                })
+              : getWheelZoomTransform(
+                  event,
+                  wrapper,
+                  transform,
+                  minScale,
+                  maxScale
+                )
         }
-      } else if (hasInteraction(VirtualPaperInteractionMode.TrackpadScrollPan)) {
+      } else if (
+        hasInteraction(VirtualPaperInteractionMode.TrackpadScrollPan)
+      ) {
         source = VirtualPaperInteractionMode.TrackpadScrollPan
         nextTransform = {
           x: transform.x - event.deltaX,
           y: transform.y - event.deltaY,
           scale: transform.scale
         }
-      } else if (hasInteraction(VirtualPaperInteractionMode.MouseWheelZoom) && wrapper) {
+      } else if (
+        hasInteraction(VirtualPaperInteractionMode.MouseWheelZoom) &&
+        wrapper
+      ) {
         source = VirtualPaperInteractionMode.MouseWheelZoom
         nextTransform = getWheelZoomTransform(
           event,
@@ -269,34 +281,13 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
 
       cancelSettleAnimation()
 
-      let settleFrom: VirtualPaperTransform | undefined
-      let wheelEndTransform = nextTransform
       if (containMode && !isReaderMode && wrapper && containerRef.current) {
-        if (source === VirtualPaperInteractionMode.TrackpadScrollPan && edgeElasticScroll) {
-          const box = measureContainBox(wrapper, containerRef.current, nextTransform.scale)
-          if (box) {
-            const elasticResult = applyElasticContainResistance({
-              transform: nextTransform,
-              containerSize: { width: box.containerWidth, height: box.containerHeight },
-              wrapperSize: { width: box.wrapperWidth, height: box.wrapperHeight },
-              enabled: true
-            })
-            nextTransform = elasticResult.elasticTransform
-            wheelEndTransform = elasticResult.targetTransform
-            if (!transformsMatch(elasticResult.elasticTransform, elasticResult.targetTransform)) {
-              settleFrom = elasticResult.elasticTransform
-              setElasticActive(true)
-            } else {
-              setElasticActive(false)
-            }
-          } else {
-            setElasticActive(false)
-          }
-        } else {
-          setElasticActive(false)
-          nextTransform = projectContainTransformForElements(nextTransform, wrapper, containerRef.current)
-          wheelEndTransform = nextTransform
-        }
+        setElasticActive(false)
+        nextTransform = projectContainTransformForElements(
+          nextTransform,
+          wrapper,
+          containerRef.current
+        )
       } else {
         setElasticActive(false)
       }
@@ -304,36 +295,15 @@ export function useWheelInteractions(args: UseVirtualPaperInteractionArgs): void
       event.preventDefault()
       updateTransform(nextTransform, createWheelMeta(source, 'change'))
       scheduleWheelEnd(
-        wheelEndTransform,
+        nextTransform,
         source,
         isReaderMode
           ? validateReaderModeZoomDebounceMs(readerModeZoomDebounceMs)
-          : WHEEL_END_DEBOUNCE_MS,
-        settleFrom
+          : WHEEL_END_DEBOUNCE_MS
       )
     },
-    [cancelSettleAnimation, scheduleWheelEnd, setElasticActive, transformsMatch]
+    [cancelSettleAnimation, scheduleWheelEnd, setElasticActive]
   )
-
-  useEffect(() => {
-    const { containMode, edgeElasticScroll, enabledInteractions, isReaderMode } = args
-    const trackpadEnabled = enabledInteractions.includes(VirtualPaperInteractionMode.TrackpadScrollPan)
-
-    if (!containMode || !edgeElasticScroll || isReaderMode || !trackpadEnabled) {
-      cancelSettleAnimation()
-      if (wheelEndTimerRef.current !== null) {
-        window.clearTimeout(wheelEndTimerRef.current)
-        wheelEndTimerRef.current = null
-      }
-      wheelEndStateRef.current = null
-    }
-  }, [
-    args.containMode,
-    args.edgeElasticScroll,
-    args.enabledInteractions,
-    args.isReaderMode,
-    cancelSettleAnimation
-  ])
 
   useEffect(() => {
     const wrapper = latestArgsRef.current.wrapperRef.current

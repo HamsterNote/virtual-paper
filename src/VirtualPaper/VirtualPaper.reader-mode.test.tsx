@@ -3,7 +3,10 @@ import '@testing-library/jest-dom/vitest'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { VirtualPaper } from './VirtualPaper'
-import { computeReaderLayoutMetrics, convertTransformToLayout } from './transform'
+import {
+  computeReaderLayoutMetrics,
+  convertTransformToLayout
+} from './transform'
 import { useMultiDragInteractions } from './useMultiDragInteractions'
 import { useWheelInteractions } from './useWheelInteractions'
 
@@ -50,7 +53,10 @@ describe('VirtualPaper readerMode', () => {
       manualScroll: { left: 280, top: 420 }
     }
   ] as const
-  let scrollStore = new WeakMap<HTMLElement, { scrollLeft: number; scrollTop: number }>()
+  let scrollStore = new WeakMap<
+    HTMLElement,
+    { scrollLeft: number; scrollTop: number }
+  >()
 
   const getScroll = (el: HTMLElement) => {
     const current = scrollStore.get(el)
@@ -78,14 +84,23 @@ describe('VirtualPaper readerMode', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    scrollStore = new WeakMap<HTMLElement, { scrollLeft: number; scrollTop: number }>()
-    vi.stubGlobal('ResizeObserver', class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    })
+    scrollStore = new WeakMap<
+      HTMLElement,
+      { scrollLeft: number; scrollTop: number }
+    >()
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    )
 
-    const sizeMap: Record<string, Record<(typeof propsToStub)[number], number>> = {
+    const sizeMap: Record<
+      string,
+      Record<(typeof propsToStub)[number], number>
+    > = {
       'virtual-paper-wrapper': {
         clientWidth: 500,
         clientHeight: 500,
@@ -322,17 +337,16 @@ describe('VirtualPaper readerMode', () => {
         <div>child</div>
       </VirtualPaper>
     )
-    expect(container.style.transform).toBe('translate3d(-100px, -50px, 0) scale(1)')
+    expect(container.style.transform).toBe(
+      'translate3d(-100px, -50px, 0) scale(1)'
+    )
   })
 
   // R10: missing contentSize falls back safely without crashing
   it('R10: missing contentSize falls back to wrapper size without crashing', () => {
     expect(() => {
       render(
-        <VirtualPaper
-          readerMode
-          transform={{ x: 0, y: 0, scale: 1 }}
-        >
+        <VirtualPaper readerMode transform={{ x: 0, y: 0, scale: 1 }}>
           <div>child</div>
         </VirtualPaper>
       )
@@ -547,84 +561,108 @@ describe('VirtualPaper readerMode', () => {
     expect(container.style.display).not.toBe('grid')
   })
 
-  it.each(readerScrollSyncCases)('S1: transform → native scroll sync keeps centered fit axes at zero ($label)', ({ contentSize, transform }) => {
-    render(
-      <VirtualPaper
-        readerMode
-        transform={transform}
-        contentSize={contentSize}
-      >
-        <div>child</div>
-      </VirtualPaper>
-    )
+  it.each(readerScrollSyncCases)(
+    'S1: transform → native scroll sync keeps centered fit axes at zero ($label)',
+    ({ contentSize, transform }) => {
+      render(
+        <VirtualPaper
+          readerMode
+          transform={transform}
+          contentSize={contentSize}
+        >
+          <div>child</div>
+        </VirtualPaper>
+      )
 
-    const wrapper = screen.getByTestId('virtual-paper-wrapper')
-    const metrics = computeReaderLayoutMetrics(
-      contentSize,
-      transform.scale,
-      wrapperSize.width,
-      wrapperSize.height,
-      transform
-    )
-    const layout = convertTransformToLayout(
-      transform,
-      contentSize,
-      wrapperSize.width,
-      wrapperSize.height
-    )
+      const wrapper = screen.getByTestId('virtual-paper-wrapper')
+      const metrics = computeReaderLayoutMetrics(
+        contentSize,
+        transform.scale,
+        wrapperSize.width,
+        wrapperSize.height,
+        transform
+      )
+      const layout = convertTransformToLayout(
+        transform,
+        contentSize,
+        wrapperSize.width,
+        wrapperSize.height
+      )
 
-    expect(wrapper.scrollLeft).toBe(Math.max(0, Math.round(layout.scrollLeft)))
-    expect(wrapper.scrollTop).toBe(Math.max(0, Math.round(layout.scrollTop)))
-    expectReaderAxisSync(wrapper.scrollLeft, metrics.boundedTransform.x, metrics.maxScrollLeft)
-    expectReaderAxisSync(wrapper.scrollTop, metrics.boundedTransform.y, metrics.maxScrollTop)
-  })
-
-  it.each(readerScrollSyncCases)('S2: native scroll → transform sync ignores fit axes ($label)', ({ contentSize, manualScroll }) => {
-    const onTransformChange = vi.fn()
-    render(
-      <VirtualPaper
-        readerMode
-        transform={{ x: 0, y: 0, scale: 1 }}
-        contentSize={contentSize}
-        onTransformChange={onTransformChange}
-      >
-        <div>child</div>
-      </VirtualPaper>
-    )
-
-    const wrapper = screen.getByTestId('virtual-paper-wrapper')
-    act(() => {
-      wrapper.scrollLeft = manualScroll.left
-      wrapper.scrollTop = manualScroll.top
-      fireEvent.scroll(wrapper)
-    })
-
-    const metrics = computeReaderLayoutMetrics(
-      contentSize,
-      1,
-      wrapperSize.width,
-      wrapperSize.height,
-      { x: -manualScroll.left, y: -manualScroll.top, scale: 1 }
-    )
-    const expectedTransform = metrics.boundedTransform
-
-    expectReaderAxisSync(wrapper.scrollLeft, expectedTransform.x, metrics.maxScrollLeft)
-    expectReaderAxisSync(wrapper.scrollTop, expectedTransform.y, metrics.maxScrollTop)
-
-    if (expectedTransform.x === 0 && expectedTransform.y === 0) {
-      expect(onTransformChange).not.toHaveBeenCalled()
-      return
+      expect(wrapper.scrollLeft).toBe(
+        Math.max(0, Math.round(layout.scrollLeft))
+      )
+      expect(wrapper.scrollTop).toBe(Math.max(0, Math.round(layout.scrollTop)))
+      expectReaderAxisSync(
+        wrapper.scrollLeft,
+        metrics.boundedTransform.x,
+        metrics.maxScrollLeft
+      )
+      expectReaderAxisSync(
+        wrapper.scrollTop,
+        metrics.boundedTransform.y,
+        metrics.maxScrollTop
+      )
     }
+  )
 
-    expect(onTransformChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        x: expectedTransform.x,
-        y: expectedTransform.y,
-        scale: expectedTransform.scale
-      }),
-      expect.objectContaining({ source: 'TrackpadScrollPan' })
-    )
-  })
+  it.each(readerScrollSyncCases)(
+    'S2: native scroll → transform sync ignores fit axes ($label)',
+    ({ contentSize, manualScroll }) => {
+      const onTransformChange = vi.fn()
+      render(
+        <VirtualPaper
+          readerMode
+          transform={{ x: 0, y: 0, scale: 1 }}
+          contentSize={contentSize}
+          onTransformChange={onTransformChange}
+        >
+          <div>child</div>
+        </VirtualPaper>
+      )
+
+      const wrapper = screen.getByTestId('virtual-paper-wrapper')
+      act(() => {
+        wrapper.scrollLeft = manualScroll.left
+        wrapper.scrollTop = manualScroll.top
+        fireEvent.scroll(wrapper)
+      })
+
+      const metrics = computeReaderLayoutMetrics(
+        contentSize,
+        1,
+        wrapperSize.width,
+        wrapperSize.height,
+        { x: -manualScroll.left, y: -manualScroll.top, scale: 1 }
+      )
+      const expectedTransform = metrics.boundedTransform
+
+      expectReaderAxisSync(
+        wrapper.scrollLeft,
+        expectedTransform.x,
+        metrics.maxScrollLeft
+      )
+      expectReaderAxisSync(
+        wrapper.scrollTop,
+        expectedTransform.y,
+        metrics.maxScrollTop
+      )
+
+      if (expectedTransform.x === 0 && expectedTransform.y === 0) {
+        expect(onTransformChange).not.toHaveBeenCalled()
+        return
+      }
+
+      expect(onTransformChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          x: expectedTransform.x,
+          y: expectedTransform.y,
+          scale: expectedTransform.scale
+        }),
+        expect.objectContaining({ source: 'TrackpadScrollPan' })
+      )
+    }
+  )
 
   // F2: sub-pixel scroll echo within tolerance does NOT update transform
   it('F2: scroll echo within READER_PROGRAMMATIC_SCROLL_TOLERANCE_PX skips transform update', () => {

@@ -2,23 +2,22 @@ import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
 /**
- * Browser-level QA for inertialScroll and edgeElasticScroll toggles.
+ * Browser-level QA for edgeElasticScroll toggle and reader-mode scrolling.
  *
  * Demo page wiring (App.tsx):
- *   - Added inertialScroll and edgeElasticScroll toggle checkboxes
- *     (data-testid="inertial-scroll-toggle" / "edge-elastic-scroll-toggle").
+ *   - edgeElasticScroll toggle checkbox (data-testid="edge-elastic-scroll-toggle").
+ *   - containMode toggle checkbox (data-testid="contain-mode-toggle").
  *   - Wired props into <VirtualPaper> so toggles actually affect runtime behaviour.
  *
  * Scenarios covered:
- *   1. inertialScroll prop is wired and drag gestures still work correctly.
- *   2. edgeElasticScroll prop is wired and drag gestures still work correctly.
- *   3. Reader mode still scrolls natively with no elastic rubber-band transform.
+ *   1. edgeElasticScroll prop is wired and drag gestures still work correctly.
+ *   2. Reader mode still scrolls natively with no elastic rubber-band transform.
  *
- * Note on inertial/elastic observability:
- *   The inertial continuation and elastic overshoot behaviours are driven by the
- *   internal @system-ui-js/multi-drag library. They complete very quickly
- *   (sub-100ms) and depend on precise pose-record timing, making them difficult
- *   to observe reliably in e2e. Detailed behaviour is covered by unit tests in
+ * Note on elastic observability:
+ *   The elastic overshoot behaviour is driven by the internal
+ *   @system-ui-js/multi-drag library. It completes very quickly (sub-100ms)
+ *   and depends on precise pose-record timing, making it difficult to observe
+ *   reliably in e2e. Detailed behaviour is covered by unit tests in
  *   useMultiDragInteractions.test.tsx and useWheelInteractions.test.tsx.
  */
 
@@ -38,7 +37,9 @@ interface ReactFiberNode {
 }
 
 async function readTransform(page: Page): Promise<TransformReadout> {
-  const text = await page.locator('[data-testid="transform-readout"]').innerText()
+  const text = await page
+    .locator('[data-testid="transform-readout"]')
+    .innerText()
   const match = text.match(TRANSFORM_RE)
   if (!match) {
     throw new Error(`Unexpected transform readout: ${text}`)
@@ -70,7 +71,9 @@ async function ensureModeChecked(page: Page, testId: string) {
 }
 
 /** Read VirtualPaper props via React fiber (for verifying prop wiring) */
-async function readVirtualPaperProps(page: Page): Promise<Record<string, unknown> | null> {
+async function readVirtualPaperProps(
+  page: Page
+): Promise<Record<string, unknown> | null> {
   return page.evaluate(() => {
     function isRecord(value: unknown): value is Record<string, unknown> {
       return typeof value === 'object' && value !== null
@@ -80,17 +83,30 @@ async function readVirtualPaperProps(page: Page): Promise<Record<string, unknown
       return isRecord(value)
     }
 
-    const container = document.querySelector('[data-testid="virtual-paper-wrapper"]')
+    const container = document.querySelector(
+      '[data-testid="virtual-paper-wrapper"]'
+    )
     if (!container) return null
 
-    const key = Object.keys(container).find((k) => k.startsWith('__reactFiber$'))
+    const key = Object.keys(container).find((k) =>
+      k.startsWith('__reactFiber$')
+    )
     if (!key) return null
 
     let fiber: unknown = Reflect.get(container, key)
     while (isReactFiberNode(fiber) && isReactFiberNode(fiber.return)) {
       const parent = fiber.return
       if (parent.elementType?.name === 'VirtualPaper') {
-        return isRecord(parent.memoizedProps) ? parent.memoizedProps : null
+        const memoizedProps = parent.memoizedProps
+        if (!isRecord(memoizedProps)) return null
+        // 只返回可序列化的原始 prop，避免 React fiber / children 等引用链过长。
+        const keys = [
+          'edgeElasticScroll',
+          'readerMode',
+          'containMode',
+          'renderMode'
+        ]
+        return Object.fromEntries(keys.map((k) => [k, memoizedProps[k]]))
       }
       fiber = parent
     }
@@ -98,112 +114,17 @@ async function readVirtualPaperProps(page: Page): Promise<Record<string, unknown
   })
 }
 
-test.describe('Scroll inertia & elastic toggles', () => {
+test.describe('Edge elastic and reader-mode scrolling', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')
     await page.waitForSelector('[data-testid="transform-readout"]')
   })
 
-  // --- Test 1: inertialScroll is wired and drag works ---
-  test('inertialScroll: prop is wired and drag gestures work', async ({ page }) => {
-    // Enable inertial scroll (causes remount)
-    await page.locator('[data-testid="inertial-scroll-toggle"]').check()
-    await page.waitForTimeout(150)
-
-    // Verify the prop is passed to VirtualPaper
-    const props = await readVirtualPaperProps(page)
-    expect(props).not.toBeNull()
-    expect(props?.inertialScroll).toBe(true)
-
-    // Enable MouseDragPan for desktop pointer interaction
-    await ensureModeChecked(page, 'mode-toggle-MouseDragPan')
-
-    const wrapper = page.locator('[data-testid="virtual-paper-wrapper"]')
-    const box = await wrapper.boundingBox()
-    if (!box) {
-      throw new Error('VirtualPaper wrapper bounding box is unavailable')
-    }
-
-    // First zoom in so content is oversized and draggable
-    await wrapper.evaluate((el) => {
-      const rect = el.getBoundingClientRect()
-      el.dispatchEvent(
-        new WheelEvent('wheel', {
-          ctrlKey: true,
-          deltaY: -400,
-          clientX: rect.left + rect.width / 2,
-          clientY: rect.top + rect.height / 2,
-          bubbles: true
-        })
-      )
-    })
-    await page.waitForTimeout(200)
-
-    const afterZoom = await readTransform(page)
-    expect(afterZoom.scale).toBeGreaterThan(1.2)
-
-    const cx = box.x + box.width / 2
-    const cy = box.y + box.height / 2
-
-    // Record transform before gesture
-    const before = await readTransform(page)
-
-    // --- Mouse drag with stepped movement ---
-    const startX = cx
-    const startY = cy
-    const endX = cx + 200
-    const endY = cy + 100
-
-    await page.mouse.move(startX, startY)
-    await page.mouse.down()
-    await page.mouse.move(endX, endY, { steps: 5 })
-    await page.waitForTimeout(50)
-    const duringDrag = await readTransform(page)
-    await page.mouse.up()
-
-    // Sample after release
-    const samples: TransformReadout[] = []
-    for (let i = 0; i < 10; i++) {
-      await page.waitForTimeout(40)
-      const t = await readTransform(page)
-      samples.push({ ...t })
-    }
-
-    const afterRelease = samples[samples.length - 1]
-    if (!afterRelease) {
-      throw new Error('Missing inertial release transform sample')
-    }
-
-    // Log numeric evidence
-    const logLines = [
-      `inertialScroll prop: ${props?.inertialScroll}`,
-      `Before drag: x=${before.x.toFixed(2)}, y=${before.y.toFixed(2)}, scale=${before.scale.toFixed(3)}`,
-      `During drag: x=${duringDrag.x.toFixed(2)}, y=${duringDrag.y.toFixed(2)}, scale=${duringDrag.scale.toFixed(3)}`,
-      `After release: x=${afterRelease.x.toFixed(2)}, y=${afterRelease.y.toFixed(2)}, scale=${afterRelease.scale.toFixed(3)}`
-    ]
-    console.log(logLines.join('\n'))
-
-    // Assertions:
-    // 1. The inertialScroll prop is correctly wired
-    expect(props?.inertialScroll).toBe(true)
-
-    // 2. During drag, the transform should have moved
-    expect(duringDrag.x).not.toBe(before.x)
-
-    // 3. The drag produced a non-zero displacement
-    const dragDeltaX = Math.abs(duringDrag.x - before.x)
-    const dragDeltaY = Math.abs(duringDrag.y - before.y)
-    expect(dragDeltaX + dragDeltaY).toBeGreaterThan(0)
-
-    // 4. After release, the transform is still accessible (component didn't crash)
-    expect(afterRelease.scale).toBe(afterZoom.scale)
-
-    await saveEvidence(page, 'task-9-inertial-pointer-drag.png')
-  })
-
-  // --- Test 2: edgeElasticScroll is wired and drag works ---
-  test('edgeElasticScroll: prop is wired and drag gestures work', async ({ page }) => {
+  // --- Test 1: edgeElasticScroll is wired and drag works ---
+  test('edgeElasticScroll: prop is wired and drag gestures work', async ({
+    page
+  }) => {
     // Enable contain mode and edge elastic scroll (causes remount)
     await page.locator('[data-testid="contain-mode-toggle"]').check()
     await page.locator('[data-testid="edge-elastic-scroll-toggle"]').check()
@@ -296,8 +217,10 @@ test.describe('Scroll inertia & elastic toggles', () => {
     await saveEvidence(page, 'task-9-edge-elastic-overshoot.png')
   })
 
-  // --- Test 3: Reader mode with elastic toggles still uses native scroll ---
-  test('reader mode ignores elastic toggles and uses native scroll', async ({ page }) => {
+  // --- Test 2: Reader mode with elastic toggle still uses native scroll ---
+  test('reader mode ignores elastic toggles and uses native scroll', async ({
+    page
+  }) => {
     // Use a viewport smaller than the content so scrolling is possible
     await page.setViewportSize({ width: 400, height: 300 })
     await page.goto('/')
@@ -308,8 +231,7 @@ test.describe('Scroll inertia & elastic toggles', () => {
     await page.locator('[data-testid="reader-mode-toggle"]').check()
     await page.waitForTimeout(100)
 
-    // Enable elastic toggles (they should be ignored in reader mode)
-    await page.locator('[data-testid="inertial-scroll-toggle"]').check()
+    // Enable elastic toggle (it should be ignored in reader mode)
     await page.locator('[data-testid="edge-elastic-scroll-toggle"]').check()
     await page.waitForTimeout(100)
 
@@ -352,8 +274,8 @@ test.describe('Scroll inertia & elastic toggles', () => {
 
     console.log(
       `Reader mode scroll: before=(${scrollBefore.scrollLeft},${scrollBefore.scrollTop}) ` +
-      `after=(${scrollAfter.scrollLeft},${scrollAfter.scrollTop}) ` +
-      `readout=(${readout.x.toFixed(2)},${readout.y.toFixed(2)})`
+        `after=(${scrollAfter.scrollLeft},${scrollAfter.scrollTop}) ` +
+        `readout=(${readout.x.toFixed(2)},${readout.y.toFixed(2)})`
     )
 
     await saveEvidence(page, 'task-9-reader-mode-native-scroll.png')

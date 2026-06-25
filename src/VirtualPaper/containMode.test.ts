@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { measureContainBox, projectContainTransformForElements } from './containMode'
+import {
+  measureContainBox,
+  projectContainTransformForElements
+} from './containMode'
 
 // ---- DOM mock helpers ----
 
@@ -21,10 +24,22 @@ function createMockElement(
     rect = { width: 0, height: 0 }
   } = overrides
 
-  Object.defineProperty(el, 'clientWidth', { value: clientWidth, configurable: true })
-  Object.defineProperty(el, 'clientHeight', { value: clientHeight, configurable: true })
-  Object.defineProperty(el, 'offsetWidth', { value: offsetWidth, configurable: true })
-  Object.defineProperty(el, 'offsetHeight', { value: offsetHeight, configurable: true })
+  Object.defineProperty(el, 'clientWidth', {
+    value: clientWidth,
+    configurable: true
+  })
+  Object.defineProperty(el, 'clientHeight', {
+    value: clientHeight,
+    configurable: true
+  })
+  Object.defineProperty(el, 'offsetWidth', {
+    value: offsetWidth,
+    configurable: true
+  })
+  Object.defineProperty(el, 'offsetHeight', {
+    value: offsetHeight,
+    configurable: true
+  })
   el.getBoundingClientRect = vi.fn(() => ({
     width: rect.width,
     height: rect.height,
@@ -55,7 +70,11 @@ describe('measureContainBox', () => {
   })
 
   it('returns null when wrapper clientWidth is 0 and getBoundingClientRect fallback is also 0', () => {
-    const wrapper = createMockElement({ clientWidth: 0, clientHeight: 0, rect: { width: 0, height: 0 } })
+    const wrapper = createMockElement({
+      clientWidth: 0,
+      clientHeight: 0,
+      rect: { width: 0, height: 0 }
+    })
     const container = createMockElement({ offsetWidth: 400, offsetHeight: 300 })
 
     expect(measureContainBox(wrapper, container, 1)).toBeNull()
@@ -105,11 +124,19 @@ describe('projectContainTransformForElements', () => {
   })
 
   it('returns original transform when measurement fails (zero wrapper)', () => {
-    const wrapper = createMockElement({ clientWidth: 0, clientHeight: 0, rect: { width: 0, height: 0 } })
+    const wrapper = createMockElement({
+      clientWidth: 0,
+      clientHeight: 0,
+      rect: { width: 0, height: 0 }
+    })
     const container = createMockElement({ offsetWidth: 200, offsetHeight: 100 })
     const transform = { x: -50, y: 75, scale: 1 }
 
-    const result = projectContainTransformForElements(transform, wrapper, container)
+    const result = projectContainTransformForElements(
+      transform,
+      wrapper,
+      container
+    )
     expect(result).toEqual(transform)
   })
 

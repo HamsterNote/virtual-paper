@@ -15,10 +15,14 @@ type InitialTransformOptions = {
 }
 
 export type ReaderLayoutMetrics = {
-  readonly width: number; readonly height: number
-  readonly offsetX: number; readonly offsetY: number
-  readonly maxScrollLeft: number; readonly maxScrollTop: number
-  readonly scrollLeft: number; readonly scrollTop: number
+  readonly width: number
+  readonly height: number
+  readonly offsetX: number
+  readonly offsetY: number
+  readonly maxScrollLeft: number
+  readonly maxScrollTop: number
+  readonly scrollLeft: number
+  readonly scrollTop: number
   readonly boundedTransform: VirtualPaperTransform
 }
 
@@ -113,17 +117,23 @@ export const clampReaderTransform = (
 
 const zeroReaderLayoutMetrics = (): ReaderLayoutMetrics => {
   return {
-    width: 0, height: 0,
-    offsetX: 0, offsetY: 0,
-    maxScrollLeft: 0, maxScrollTop: 0,
-    scrollLeft: 0, scrollTop: 0,
+    width: 0,
+    height: 0,
+    offsetX: 0,
+    offsetY: 0,
+    maxScrollLeft: 0,
+    maxScrollTop: 0,
+    scrollLeft: 0,
+    scrollTop: 0,
     boundedTransform: { x: 0, y: 0, scale: 0 }
   }
 }
 
-const isPositiveFiniteNumber = (value: number): boolean => Number.isFinite(value) && value > 0
+const isPositiveFiniteNumber = (value: number): boolean =>
+  Number.isFinite(value) && value > 0
 
-const safeTransformOffset = (value: number): number => Number.isFinite(value) ? value : 0
+const safeTransformOffset = (value: number): number =>
+  Number.isFinite(value) ? value : 0
 
 // Reader 视觉居中只输出 layout offset；boundedTransform 只表达原生滚动范围。
 export const computeReaderLayoutMetrics = (
@@ -197,9 +207,13 @@ export const projectContainTransform = (
     scale: number
   ): number => {
     // 任意维度非有限数 → 原样返回 desiredOffset，避免 NaN 传播
-    if (![desiredOffset, wrapperSize, containerSize, scale].every(Number.isFinite)) return desiredOffset
+    if (
+      ![desiredOffset, wrapperSize, containerSize, scale].every(Number.isFinite)
+    )
+      return desiredOffset
     // 零或负尺寸 → 原样返回 desiredOffset
-    if (wrapperSize <= 0 || containerSize <= 0 || scale <= 0) return desiredOffset
+    if (wrapperSize <= 0 || containerSize <= 0 || scale <= 0)
+      return desiredOffset
     const scaledSize = containerSize * scale
     // container 缩放后 ≤ wrapper → 居中
     if (scaledSize <= wrapperSize) return (wrapperSize - scaledSize) / 2
@@ -208,8 +222,18 @@ export const projectContainTransform = (
   }
 
   return {
-    x: projectContainAxis(transform.x, wrapperWidth, containerSize.width, transform.scale),
-    y: projectContainAxis(transform.y, wrapperHeight, containerSize.height, transform.scale),
+    x: projectContainAxis(
+      transform.x,
+      wrapperWidth,
+      containerSize.width,
+      transform.scale
+    ),
+    y: projectContainAxis(
+      transform.y,
+      wrapperHeight,
+      containerSize.height,
+      transform.scale
+    ),
     scale: transform.scale
   }
 }
@@ -244,7 +268,10 @@ const getContainAxisBounds = (
   containerSize: number,
   scale: number
 ): ContainAxisBounds | null => {
-  if (![desiredOffset, wrapperSize, containerSize, scale].every(Number.isFinite)) return null
+  if (
+    ![desiredOffset, wrapperSize, containerSize, scale].every(Number.isFinite)
+  )
+    return null
   if (wrapperSize <= 0 || containerSize <= 0 || scale <= 0) return null
 
   const scaledSize = containerSize * scale
@@ -265,10 +292,14 @@ const applyContainAxisResistance = (
   if (!bounds) return targetOffset
   if (bounds.min === bounds.max) return targetOffset
   if (desiredOffset < bounds.min) {
-    return bounds.min + (desiredOffset - bounds.min) * CONTAIN_ELASTIC_RESISTANCE
+    return (
+      bounds.min + (desiredOffset - bounds.min) * CONTAIN_ELASTIC_RESISTANCE
+    )
   }
   if (desiredOffset > bounds.max) {
-    return bounds.max + (desiredOffset - bounds.max) * CONTAIN_ELASTIC_RESISTANCE
+    return (
+      bounds.max + (desiredOffset - bounds.max) * CONTAIN_ELASTIC_RESISTANCE
+    )
   }
   return desiredOffset
 }
@@ -295,12 +326,22 @@ export const applyElasticContainResistance = ({
       x: applyContainAxisResistance(
         transform.x,
         targetTransform.x,
-        getContainAxisBounds(transform.x, wrapperSize.width, containerSize.width, transform.scale)
+        getContainAxisBounds(
+          transform.x,
+          wrapperSize.width,
+          containerSize.width,
+          transform.scale
+        )
       ),
       y: applyContainAxisResistance(
         transform.y,
         targetTransform.y,
-        getContainAxisBounds(transform.y, wrapperSize.height, containerSize.height, transform.scale)
+        getContainAxisBounds(
+          transform.y,
+          wrapperSize.height,
+          containerSize.height,
+          transform.scale
+        )
       ),
       scale: transform.scale
     },

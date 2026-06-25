@@ -16,6 +16,17 @@ export enum VirtualPaperInitialPlacement {
   Center = 'Center'
 }
 
+/**
+ * @deprecated Use `readerMode` instead. `VirtualPaperRenderMode.Scroll` maps to
+ * `readerMode = true`, and `VirtualPaperRenderMode.Transform` maps to the default
+ * transform-based rendering. This enum is kept for backward compatibility and will
+ * be removed in a future major version.
+ */
+export enum VirtualPaperRenderMode {
+  Transform = 'Transform',
+  Scroll = 'Scroll'
+}
+
 export type VirtualPaperTransform = { x: number; y: number; scale: number }
 
 /**
@@ -47,6 +58,13 @@ export type VirtualPaperProps = {
    */
   contentSize?: VirtualPaperContentSize
   /**
+   * @deprecated Use `readerMode` instead. `VirtualPaperRenderMode.Scroll` is
+   * equivalent to `readerMode = true`, and `VirtualPaperRenderMode.Transform`
+   * is equivalent to the default transform-based rendering. When both are
+   * provided, `readerMode` takes precedence.
+   */
+  renderMode?: VirtualPaperRenderMode
+  /**
    * 阅读模式。默认 false。
    * 开启后使用原生滚动几何，适合文档阅读、PDF 阅读等场景。
    */
@@ -55,10 +73,6 @@ export type VirtualPaperProps = {
    * 非阅读模式下启用 contain 约束；默认 false。readerMode 为 true 时忽略。
    */
   containMode?: boolean
-  /**
-   * 启用滚动惯性；默认 false。这里只暴露 API 开关，具体行为由交互 hook 决定。
-   */
-  inertialScroll?: boolean
   /**
    * 启用边缘弹性滚动；默认 false。这里只暴露 API 开关，具体行为由交互 hook 决定。
    */
@@ -112,14 +126,17 @@ export type UseVirtualPaperInteractionArgs = {
    */
   containMode?: boolean
   /**
-   * 启用滚动惯性；默认 false。
-   */
-  inertialScroll?: boolean
-  /**
    * 启用边缘弹性滚动；默认 false。
    */
   edgeElasticScroll?: boolean
-  elasticActiveRef?: React.MutableRefObject<boolean>
+  /**
+   * 标记一次弹性交互开始。每个调用必须对应一次 `decrementElasticActive`。
+   */
+  incrementElasticActive?: () => void
+  /**
+   * 标记一次弹性交互结束。必须与之前的 `incrementElasticActive` 配对调用。
+   */
+  decrementElasticActive?: () => void
   /**
    * 阅读模式下的缩放防抖时间（毫秒）。
    * 默认 500ms。仅在 isReaderMode 为 true 时生效。

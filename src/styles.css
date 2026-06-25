@@ -151,8 +151,7 @@ button {
 /* ---- Transform readout ---- */
 
 [data-testid='transform-readout'] {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.82rem;
   font-weight: 700;
   word-break: break-all;

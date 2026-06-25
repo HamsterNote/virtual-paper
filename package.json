@@ -17,7 +17,9 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "sideEffects": false,
   "packageManager": "yarn@1.22.22",
   "scripts": {
