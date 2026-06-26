@@ -83,9 +83,10 @@ export type VirtualPaperProps = {
    */
   readerModeZoomDebounceMs?: number
   /**
-   * 延迟启用 will-change: transform 的交互阈值。
-   * 默认 0 表示默认不主动设置 will-change；正值表示当缩放比例
-   * 超过该阈值时由组件动态应用，用于优化大画布缩放性能。
+   * transform 渲染模式下延迟移除 will-change: transform 的防抖时间（毫秒）。
+   * 默认 0 表示不主动设置 will-change；正值表示交互期间动态应用
+   * will-change: transform，并在交互结束后等待该毫秒数再移除。
+   * readerMode 的原生滚动不会启用该 transform 提示。
    */
   lazyWillChange?: number
   transform?: VirtualPaperTransform

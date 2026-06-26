@@ -105,11 +105,13 @@ export const VirtualPaper = ({
   const elasticActive = elasticActiveCount > 0
 
   const [isWillChangeActive, setIsWillChangeActive] = useState(false)
+  const isReaderModeRef = useRef(isReaderMode)
   const lazyWillChangeRef = useRef(lazyWillChange)
   const willChangeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
     null
   )
 
+  isReaderModeRef.current = isReaderMode
   lazyWillChangeRef.current = lazyWillChange
 
   const clearWillChangeTimer = useCallback(() => {
@@ -223,7 +225,10 @@ export const VirtualPaper = ({
       if (onTransformChange) {
         onTransformChange(next, meta)
       }
-      if (isLazyWillChangeEnabled(lazyWillChangeRef.current)) {
+      if (
+        !isReaderModeRef.current &&
+        isLazyWillChangeEnabled(lazyWillChangeRef.current)
+      ) {
         clearWillChangeTimer()
         setIsWillChangeActive(true)
       }
@@ -232,7 +237,10 @@ export const VirtualPaper = ({
   )
 
   const beginTransform = useCallback(() => {
-    if (isLazyWillChangeEnabled(lazyWillChangeRef.current)) {
+    if (
+      !isReaderModeRef.current &&
+      isLazyWillChangeEnabled(lazyWillChangeRef.current)
+    ) {
       clearWillChangeTimer()
       setIsWillChangeActive(true)
     }
@@ -247,7 +255,7 @@ export const VirtualPaper = ({
         onTransformChangeEnd(next, meta)
       }
       const ms = lazyWillChangeRef.current
-      if (isLazyWillChangeEnabled(ms)) {
+      if (!isReaderModeRef.current && isLazyWillChangeEnabled(ms)) {
         clearWillChangeTimer()
         willChangeTimerRef.current = window.setTimeout(() => {
           willChangeTimerRef.current = null
@@ -390,10 +398,10 @@ export const VirtualPaper = ({
   }, [clearWillChangeTimer])
 
   useEffect(() => {
-    if (isLazyWillChangeEnabled(lazyWillChange)) return
+    if (!isReaderMode && isLazyWillChangeEnabled(lazyWillChange)) return
     clearWillChangeTimer()
     setIsWillChangeActive(false)
-  }, [lazyWillChange, clearWillChangeTimer])
+  }, [isReaderMode, lazyWillChange, clearWillChangeTimer])
 
   const baseWrapperStyle = {
     position: 'relative',

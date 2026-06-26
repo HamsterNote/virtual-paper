@@ -1407,6 +1407,46 @@ describe('VirtualPaper', () => {
       expect(container.style.willChange).toBe('')
     })
 
+    it('does not leak reader-mode native scroll will-change when switching to transform mode', () => {
+      const { rerender } = render(
+        <VirtualPaper
+          lazyWillChange={200}
+          readerMode
+          contentSize={{ width: 600, height: 400 }}
+        >
+          <div>child</div>
+        </VirtualPaper>
+      )
+
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 0, y: -40, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+      })
+      expect(screen.getByTestId('virtual-paper-container').style.willChange).toBe(
+        ''
+      )
+
+      rerender(
+        <VirtualPaper
+          lazyWillChange={200}
+          readerMode={false}
+          contentSize={{ width: 600, height: 400 }}
+        >
+          <div>child</div>
+        </VirtualPaper>
+      )
+
+      expect(screen.getByTestId('virtual-paper-container').style.willChange).toBe(
+        ''
+      )
+    })
+
     it('preserves user containerStyle.willChange when lazy is inactive', () => {
       render(
         <VirtualPaper containerStyle={{ willChange: 'opacity' }}>
