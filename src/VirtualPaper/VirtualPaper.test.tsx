@@ -1067,6 +1067,108 @@ describe('VirtualPaper', () => {
       expect(container.style.willChange).toBe('transform')
     })
 
+    it('enables will-change when a touch zoom transform begins', () => {
+      const onTransformChange = vi.fn()
+      const onTransformChangeEnd = vi.fn()
+      render(
+        <VirtualPaper
+          lazyWillChange={200}
+          onTransformChange={onTransformChange}
+          onTransformChangeEnd={onTransformChangeEnd}
+        >
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+      onTransformChange.mockClear()
+
+      act(() => {
+        getLatestMultiDragArgs().beginTransform()
+      })
+
+      expect(container.style.willChange).toBe('transform')
+      expect(onTransformChange).not.toHaveBeenCalled()
+      expect(onTransformChangeEnd).not.toHaveBeenCalled()
+    })
+
+    it('keeps lazy will-change active until debounce elapses for two-finger touch pan', () => {
+      render(
+        <VirtualPaper lazyWillChange={200}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+
+      act(() => {
+        getLatestMultiDragArgs().updateTransform(
+          { x: 50, y: 60, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TouchTwoFingerPan,
+            inputType: 'pointer',
+            phase: 'change'
+          }
+        )
+        getLatestMultiDragArgs().endTransform(
+          { x: 50, y: 60, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TouchTwoFingerPan,
+            inputType: 'pointer',
+            phase: 'end'
+          }
+        )
+      })
+      expect(container.style.willChange).toBe('transform')
+
+      act(() => {
+        vi.advanceTimersByTime(199)
+      })
+      expect(container.style.willChange).toBe('transform')
+
+      act(() => {
+        vi.advanceTimersByTime(1)
+      })
+      expect(container.style.willChange).toBe('')
+    })
+
+    it('keeps lazy will-change active until debounce elapses for two-finger touch zoom', () => {
+      render(
+        <VirtualPaper lazyWillChange={200}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+
+      act(() => {
+        getLatestMultiDragArgs().updateTransform(
+          { x: 0, y: 0, scale: 2 },
+          {
+            source: VirtualPaperInteractionMode.TouchTwoFingerZoom,
+            inputType: 'pointer',
+            phase: 'change'
+          }
+        )
+        getLatestMultiDragArgs().endTransform(
+          { x: 0, y: 0, scale: 2 },
+          {
+            source: VirtualPaperInteractionMode.TouchTwoFingerZoom,
+            inputType: 'pointer',
+            phase: 'end'
+          }
+        )
+      })
+      expect(container.style.willChange).toBe('transform')
+
+      act(() => {
+        vi.advanceTimersByTime(199)
+      })
+      expect(container.style.willChange).toBe('transform')
+
+      act(() => {
+        vi.advanceTimersByTime(1)
+      })
+      expect(container.style.willChange).toBe('')
+    })
+
     it('keeps will-change active after endTransform until the debounce elapses', () => {
       render(
         <VirtualPaper lazyWillChange={200}>
@@ -1469,8 +1571,7 @@ describe('VirtualPaper', () => {
 
       const unmountedWarnings = consoleErrorSpy.mock.calls.filter(
         ([message]) =>
-          typeof message === 'string' &&
-          /unmounted|state update/i.test(message)
+          typeof message === 'string' && /unmounted|state update/i.test(message)
       )
       expect(unmountedWarnings).toHaveLength(0)
       expect(vi.getTimerCount()).toBe(0)

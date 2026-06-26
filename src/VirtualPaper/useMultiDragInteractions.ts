@@ -218,6 +218,7 @@ export function useMultiDragInteractions(
     minScale,
     maxScale,
     contentSize,
+    beginTransform,
     updateTransform,
     endTransform,
     isReaderMode,
@@ -232,6 +233,7 @@ export function useMultiDragInteractions(
   const minScaleRef = useRef(minScale)
   const maxScaleRef = useRef(maxScale)
   const contentSizeRef = useRef(contentSize)
+  const beginTransformRef = useRef(beginTransform)
   const updateTransformRef = useRef(updateTransform)
   const endTransformRef = useRef(endTransform)
   const isReaderModeRef = useRef(isReaderMode)
@@ -269,6 +271,7 @@ export function useMultiDragInteractions(
   minScaleRef.current = minScale
   maxScaleRef.current = maxScale
   contentSizeRef.current = contentSize
+  beginTransformRef.current = beginTransform
   updateTransformRef.current = updateTransform
   endTransformRef.current = endTransform
   isReaderModeRef.current = isReaderMode
@@ -669,6 +672,13 @@ export function useMultiDragInteractions(
       lastActiveGestureRef.current = null
       trackGesture(fingers)
       captureZoomSegment(fingers)
+      if (
+        !isReaderModeRef.current &&
+        activeGestureRef.current?.zoomSource ===
+          VirtualPaperInteractionMode.TouchTwoFingerZoom
+      ) {
+        beginTransformRef.current()
+      }
     })
     mixin.addEventListener(DragOperationType.Move, trackGesture)
     mixin.addEventListener(DragOperationType.End, (fingers) => {

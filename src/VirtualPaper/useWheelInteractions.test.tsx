@@ -61,6 +61,7 @@ function WheelHarness({
     minScale,
     maxScale,
     contentSize,
+    beginTransform: () => undefined,
     updateTransform(next, meta) {
       onUpdate(next, meta)
       setTransform(next)

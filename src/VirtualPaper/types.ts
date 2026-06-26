@@ -113,6 +113,8 @@ export type VirtualPaperTransformUpdater = (
   meta: VirtualPaperTransformMeta
 ) => void
 
+export type VirtualPaperTransformBegin = () => void
+
 export type UseVirtualPaperInteractionArgs = {
   wrapperRef: React.RefObject<HTMLDivElement | null>
   containerRef: React.RefObject<HTMLDivElement | null>
@@ -121,6 +123,7 @@ export type UseVirtualPaperInteractionArgs = {
   minScale: number
   maxScale: number
   contentSize?: VirtualPaperContentSize
+  beginTransform: VirtualPaperTransformBegin
   updateTransform: VirtualPaperTransformUpdater
   endTransform: VirtualPaperTransformUpdater
   /**

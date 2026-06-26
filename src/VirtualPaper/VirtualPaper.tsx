@@ -1,3 +1,4 @@
+// allow: SIZE_OK — VirtualPaper component integration hub; splitting is a separate behavior-preserving refactor.
 import {
   useCallback,
   useEffect,
@@ -229,6 +230,13 @@ export const VirtualPaper = ({
     },
     [isControlled, onTransformChange, clearWillChangeTimer]
   )
+
+  const beginTransform = useCallback(() => {
+    if (isLazyWillChangeEnabled(lazyWillChangeRef.current)) {
+      clearWillChangeTimer()
+      setIsWillChangeActive(true)
+    }
+  }, [clearWillChangeTimer])
 
   const endTransform = useCallback(
     (next: VirtualPaperTransform, meta: VirtualPaperTransformMeta) => {
@@ -466,6 +474,7 @@ export const VirtualPaper = ({
     minScale,
     maxScale,
     contentSize,
+    beginTransform,
     updateTransform,
     endTransform,
     isReaderMode,
@@ -484,6 +493,7 @@ export const VirtualPaper = ({
     minScale,
     maxScale,
     contentSize,
+    beginTransform,
     updateTransform,
     endTransform,
     isReaderMode,
