@@ -82,6 +82,12 @@ export type VirtualPaperProps = {
    * 默认 500ms。仅在 readerMode 为 true 时生效。
    */
   readerModeZoomDebounceMs?: number
+  /**
+   * 延迟启用 will-change: transform 的交互阈值。
+   * 默认 0 表示默认不主动设置 will-change；正值表示当缩放比例
+   * 超过该阈值时由组件动态应用，用于优化大画布缩放性能。
+   */
+  lazyWillChange?: number
   transform?: VirtualPaperTransform
   defaultTransform?: Partial<VirtualPaperTransform>
   minScale?: number

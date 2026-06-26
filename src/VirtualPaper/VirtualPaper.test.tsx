@@ -284,7 +284,7 @@ describe('VirtualPaper', () => {
     )
     const container = screen.getByTestId('virtual-paper-container')
     expect(container.style.position).toBe('absolute')
-    expect(container.style.willChange).toBe('transform')
+    expect(container.style.willChange).toBe('')
     expect(container.style.touchAction).toBe('none')
     expect(container.style.userSelect).toBe('text')
   })
@@ -965,5 +965,517 @@ describe('VirtualPaper', () => {
     expect(container.style.transform).toBe(
       'translate3d(999px, -999px, 0) scale(1)'
     )
+  })
+
+  describe('lazyWillChange', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('default lazyWillChange={0} leaves willChange empty', () => {
+      render(
+        <VirtualPaper lazyWillChange={0}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+      expect(container.style.willChange).toBe('')
+
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+      })
+      expect(container.style.willChange).toBe('')
+    })
+
+    it('sets will-change to transform while updateTransform is active', () => {
+      render(
+        <VirtualPaper lazyWillChange={200}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+      expect(container.style.willChange).toBe('')
+
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+      })
+
+      expect(container.style.willChange).toBe('transform')
+    })
+
+    it('enables will-change on a wheel zoom update', () => {
+      render(
+        <VirtualPaper lazyWillChange={200}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+      expect(container.style.willChange).toBe('')
+
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 0, y: 0, scale: 1.5 },
+          {
+            source: VirtualPaperInteractionMode.MouseWheelCtrlZoom,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+      })
+
+      expect(container.style.willChange).toBe('transform')
+    })
+
+    it('enables will-change on a pan update via multi-drag', () => {
+      render(
+        <VirtualPaper lazyWillChange={200}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+      expect(container.style.willChange).toBe('')
+
+      act(() => {
+        getLatestMultiDragArgs().updateTransform(
+          { x: 30, y: 40, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TouchSingleFingerPan,
+            inputType: 'pointer',
+            phase: 'change'
+          }
+        )
+      })
+
+      expect(container.style.willChange).toBe('transform')
+    })
+
+    it('keeps will-change active after endTransform until the debounce elapses', () => {
+      render(
+        <VirtualPaper lazyWillChange={200}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+        getLatestWheelArgs().endTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'end'
+          }
+        )
+      })
+
+      expect(container.style.willChange).toBe('transform')
+    })
+
+    it('removes will-change after advancing fake timers through the debounce', () => {
+      render(
+        <VirtualPaper lazyWillChange={200}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+        getLatestWheelArgs().endTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'end'
+          }
+        )
+      })
+      expect(container.style.willChange).toBe('transform')
+
+      act(() => {
+        vi.advanceTimersByTime(199)
+      })
+      expect(container.style.willChange).toBe('transform')
+
+      act(() => {
+        vi.advanceTimersByTime(1)
+      })
+      expect(container.style.willChange).toBe('')
+    })
+
+    it('cancels pending removal and restarts debounce when a new update arrives before expiry', () => {
+      render(
+        <VirtualPaper lazyWillChange={200}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+        getLatestWheelArgs().endTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'end'
+          }
+        )
+      })
+      expect(container.style.willChange).toBe('transform')
+
+      act(() => {
+        vi.advanceTimersByTime(199)
+      })
+      expect(container.style.willChange).toBe('transform')
+
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 20, y: 30, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+        getLatestWheelArgs().endTransform(
+          { x: 20, y: 30, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'end'
+          }
+        )
+      })
+      expect(container.style.willChange).toBe('transform')
+
+      act(() => {
+        vi.advanceTimersByTime(1)
+      })
+      expect(container.style.willChange).toBe('transform')
+
+      act(() => {
+        vi.advanceTimersByTime(198)
+      })
+      expect(container.style.willChange).toBe('transform')
+
+      act(() => {
+        vi.advanceTimersByTime(1)
+      })
+      expect(container.style.willChange).toBe('')
+    })
+
+    it('does not enable will-change for disabled lazyWillChange values', () => {
+      const { rerender } = render(
+        <VirtualPaper lazyWillChange={0}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+      })
+      expect(container.style.willChange).toBe('')
+
+      rerender(
+        <VirtualPaper lazyWillChange={-1}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+      })
+      expect(container.style.willChange).toBe('')
+
+      rerender(
+        <VirtualPaper lazyWillChange={NaN}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+      })
+      expect(container.style.willChange).toBe('')
+
+      rerender(
+        <VirtualPaper lazyWillChange={Infinity}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+      })
+      expect(container.style.willChange).toBe('')
+    })
+
+    it('clears active will-change when lazyWillChange becomes disabled at runtime', () => {
+      const { rerender } = render(
+        <VirtualPaper lazyWillChange={200}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+      })
+      expect(container.style.willChange).toBe('transform')
+
+      rerender(
+        <VirtualPaper lazyWillChange={0}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      expect(container.style.willChange).toBe('')
+    })
+
+    it('preserves user containerStyle.willChange when lazy is inactive', () => {
+      render(
+        <VirtualPaper containerStyle={{ willChange: 'opacity' }}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+      expect(container.style.willChange).toBe('opacity')
+    })
+
+    it('preserves user containerProps.style.willChange when lazy is inactive', () => {
+      render(
+        <VirtualPaper containerProps={{ style: { willChange: 'opacity' } }}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+      expect(container.style.willChange).toBe('opacity')
+    })
+
+    it('overrides only willChange when lazy active while keeping other user styles', () => {
+      render(
+        <VirtualPaper
+          lazyWillChange={200}
+          containerStyle={{ color: 'red' }}
+          containerProps={{
+            style: {
+              willChange: 'opacity',
+              backgroundColor: 'blue'
+            }
+          }}
+        >
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 10, y: 20, scale: 1.5 },
+          {
+            source: VirtualPaperInteractionMode.MouseWheelCtrlZoom,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+      })
+
+      expect(container.style.willChange).toBe('transform')
+      expect(container.style.color).toBe('red')
+      expect(container.style.backgroundColor).toBe('blue')
+      expect(container.style.transform).toBe(
+        'translate3d(10px, 20px, 0) scale(1.5)'
+      )
+      expect(container.style.transformOrigin).toBe('0 0')
+      expect(container.style.userSelect).toBe('text')
+    })
+
+    it('calls onTransformChange and onTransformChangeEnd immediately, not delayed by lazy debounce', () => {
+      const onTransformChange = vi.fn()
+      const onTransformChangeEnd = vi.fn()
+      render(
+        <VirtualPaper
+          lazyWillChange={200}
+          onTransformChange={onTransformChange}
+          onTransformChangeEnd={onTransformChangeEnd}
+        >
+          <div>child</div>
+        </VirtualPaper>
+      )
+      onTransformChange.mockClear()
+      onTransformChangeEnd.mockClear()
+
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+      })
+      expect(onTransformChange).toHaveBeenCalledTimes(1)
+      expect(onTransformChange).toHaveBeenLastCalledWith(
+        { x: 10, y: 20, scale: 1 },
+        {
+          source: VirtualPaperInteractionMode.TrackpadScrollPan,
+          inputType: 'wheel',
+          phase: 'change'
+        }
+      )
+
+      act(() => {
+        getLatestWheelArgs().endTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'end'
+          }
+        )
+      })
+      expect(onTransformChangeEnd).toHaveBeenCalledTimes(1)
+      expect(onTransformChangeEnd).toHaveBeenLastCalledWith(
+        { x: 10, y: 20, scale: 1 },
+        {
+          source: VirtualPaperInteractionMode.TrackpadScrollPan,
+          inputType: 'wheel',
+          phase: 'end'
+        }
+      )
+
+      act(() => {
+        vi.advanceTimersByTime(200)
+      })
+      expect(onTransformChange).toHaveBeenCalledTimes(1)
+      expect(onTransformChangeEnd).toHaveBeenCalledTimes(1)
+    })
+
+    it('clears pending removal timer on unmount without state-update-after-unmount warnings', () => {
+      const consoleErrorSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => {})
+
+      const { unmount } = render(
+        <VirtualPaper lazyWillChange={200}>
+          <div>child</div>
+        </VirtualPaper>
+      )
+      const container = screen.getByTestId('virtual-paper-container')
+
+      act(() => {
+        getLatestWheelArgs().updateTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'change'
+          }
+        )
+        getLatestWheelArgs().endTransform(
+          { x: 10, y: 20, scale: 1 },
+          {
+            source: VirtualPaperInteractionMode.TrackpadScrollPan,
+            inputType: 'wheel',
+            phase: 'end'
+          }
+        )
+      })
+      expect(container.style.willChange).toBe('transform')
+
+      act(() => {
+        vi.advanceTimersByTime(100)
+      })
+
+      unmount()
+
+      act(() => {
+        vi.advanceTimersByTime(300)
+      })
+
+      const unmountedWarnings = consoleErrorSpy.mock.calls.filter(
+        ([message]) =>
+          typeof message === 'string' &&
+          /unmounted|state update/i.test(message)
+      )
+      expect(unmountedWarnings).toHaveLength(0)
+      expect(vi.getTimerCount()).toBe(0)
+
+      consoleErrorSpy.mockRestore()
+    })
   })
 })

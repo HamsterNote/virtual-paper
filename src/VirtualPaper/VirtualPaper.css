@@ -9,7 +9,6 @@
 .virtual-paper-container {
   position: absolute;
   transform-origin: 0 0;
-  will-change: transform;
   touch-action: none;
   /* user-select 由组件 inline style 动态控制：
      MouseDragPan 启用时为 none（防止拖拽误选文字），
