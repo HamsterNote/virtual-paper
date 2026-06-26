@@ -1,3 +1,4 @@
+// allow: SIZE_OK — VirtualPaper component integration hub; splitting is a separate behavior-preserving refactor.
 import {
   useCallback,
   useEffect,
@@ -41,6 +42,13 @@ import './VirtualPaper.css'
  */
 const READER_PROGRAMMATIC_SCROLL_TOLERANCE_PX = 1
 
+/**
+ * 校验 lazyWillChange 是否为可用正值。
+ * 非数字、NaN、Infinity 以及 <= 0 均视为禁用。
+ */
+const isLazyWillChangeEnabled = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0
+
 export const VirtualPaper = ({
   children,
   enabledInteractions = DEFAULT_ENABLED_INTERACTIONS,
@@ -50,6 +58,7 @@ export const VirtualPaper = ({
   containMode = false,
   edgeElasticScroll = false,
   readerModeZoomDebounceMs,
+  lazyWillChange = 0,
   contentSize,
   transform: controlledTransform,
   defaultTransform,
@@ -94,6 +103,23 @@ export const VirtualPaper = ({
   } | null>(null)
   const [elasticActiveCount, setElasticActiveCount] = useState(0)
   const elasticActive = elasticActiveCount > 0
+
+  const [isWillChangeActive, setIsWillChangeActive] = useState(false)
+  const isReaderModeRef = useRef(isReaderMode)
+  const lazyWillChangeRef = useRef(lazyWillChange)
+  const willChangeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
+    null
+  )
+
+  isReaderModeRef.current = isReaderMode
+  lazyWillChangeRef.current = lazyWillChange
+
+  const clearWillChangeTimer = useCallback(() => {
+    if (willChangeTimerRef.current !== null) {
+      window.clearTimeout(willChangeTimerRef.current)
+      willChangeTimerRef.current = null
+    }
+  }, [])
 
   const incrementElasticActive = useCallback(() => {
     setElasticActiveCount((count) => count + 1)
@@ -199,9 +225,26 @@ export const VirtualPaper = ({
       if (onTransformChange) {
         onTransformChange(next, meta)
       }
+      if (
+        !isReaderModeRef.current &&
+        isLazyWillChangeEnabled(lazyWillChangeRef.current)
+      ) {
+        clearWillChangeTimer()
+        setIsWillChangeActive(true)
+      }
     },
-    [isControlled, onTransformChange]
+    [isControlled, onTransformChange, clearWillChangeTimer]
   )
+
+  const beginTransform = useCallback(() => {
+    if (
+      !isReaderModeRef.current &&
+      isLazyWillChangeEnabled(lazyWillChangeRef.current)
+    ) {
+      clearWillChangeTimer()
+      setIsWillChangeActive(true)
+    }
+  }, [clearWillChangeTimer])
 
   const endTransform = useCallback(
     (next: VirtualPaperTransform, meta: VirtualPaperTransformMeta) => {
@@ -211,8 +254,16 @@ export const VirtualPaper = ({
       if (onTransformChangeEnd) {
         onTransformChangeEnd(next, meta)
       }
+      const ms = lazyWillChangeRef.current
+      if (!isReaderModeRef.current && isLazyWillChangeEnabled(ms)) {
+        clearWillChangeTimer()
+        willChangeTimerRef.current = window.setTimeout(() => {
+          willChangeTimerRef.current = null
+          setIsWillChangeActive(false)
+        }, ms)
+      }
     },
-    [isControlled, onTransformChangeEnd]
+    [isControlled, onTransformChangeEnd, clearWillChangeTimer]
   )
 
   const transformStyle = useMemo(
@@ -342,6 +393,16 @@ export const VirtualPaper = ({
     return () => wrapper.removeEventListener('scroll', handleScroll)
   }, [getReaderContentSize, isReaderMode, updateTransform])
 
+  useEffect(() => {
+    return () => clearWillChangeTimer()
+  }, [clearWillChangeTimer])
+
+  useEffect(() => {
+    if (!isReaderMode && isLazyWillChangeEnabled(lazyWillChange)) return
+    clearWillChangeTimer()
+    setIsWillChangeActive(false)
+  }, [isReaderMode, lazyWillChange, clearWillChangeTimer])
+
   const baseWrapperStyle = {
     position: 'relative',
     overflow: 'hidden',
@@ -352,7 +413,6 @@ export const VirtualPaper = ({
   const baseContainerStyle = {
     position: 'absolute',
     transformOrigin: '0 0',
-    willChange: 'transform',
     touchAction: 'none'
   } as const
 
@@ -409,6 +469,7 @@ export const VirtualPaper = ({
     WebkitUserSelect: containerUserSelect,
     ...containerStyle,
     ...containerPropsStyle,
+    ...(isWillChangeActive ? { willChange: 'transform' } : {}),
     transform: transformStyle,
     transformOrigin: '0 0'
   }
@@ -421,6 +482,7 @@ export const VirtualPaper = ({
     minScale,
     maxScale,
     contentSize,
+    beginTransform,
     updateTransform,
     endTransform,
     isReaderMode,
@@ -439,6 +501,7 @@ export const VirtualPaper = ({
     minScale,
     maxScale,
     contentSize,
+    beginTransform,
     updateTransform,
     endTransform,
     isReaderMode,

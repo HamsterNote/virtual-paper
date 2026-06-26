@@ -82,6 +82,13 @@ export type VirtualPaperProps = {
    * 默认 500ms。仅在 readerMode 为 true 时生效。
    */
   readerModeZoomDebounceMs?: number
+  /**
+   * transform 渲染模式下延迟移除 will-change: transform 的防抖时间（毫秒）。
+   * 默认 0 表示不主动设置 will-change；正值表示交互期间动态应用
+   * will-change: transform，并在交互结束后等待该毫秒数再移除。
+   * readerMode 的原生滚动不会启用该 transform 提示。
+   */
+  lazyWillChange?: number
   transform?: VirtualPaperTransform
   defaultTransform?: Partial<VirtualPaperTransform>
   minScale?: number
@@ -107,6 +114,8 @@ export type VirtualPaperTransformUpdater = (
   meta: VirtualPaperTransformMeta
 ) => void
 
+export type VirtualPaperTransformBegin = () => void
+
 export type UseVirtualPaperInteractionArgs = {
   wrapperRef: React.RefObject<HTMLDivElement | null>
   containerRef: React.RefObject<HTMLDivElement | null>
@@ -115,6 +124,7 @@ export type UseVirtualPaperInteractionArgs = {
   minScale: number
   maxScale: number
   contentSize?: VirtualPaperContentSize
+  beginTransform: VirtualPaperTransformBegin
   updateTransform: VirtualPaperTransformUpdater
   endTransform: VirtualPaperTransformUpdater
   /**

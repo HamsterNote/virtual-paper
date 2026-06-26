@@ -536,6 +536,70 @@ test.describe('VirtualPaper readerMode', () => {
     await saveEvidence(page, 'reader-mode-bounded-zoom.png')
   })
 
+  /**
+   * Contract: reader mode intentionally excludes `will-change: transform` from
+   * the container even when `lazyWillChange` is enabled. In reader mode the
+   * container uses native scroll + layout (margins/width/height) rather than
+   * CSS `transform`, so a `will-change: transform` hint would be misleading
+   * and wasteful. This test locks that exclusion.
+   */
+  test('lazyWillChange does not apply will-change transform in reader mode after touch pan', async ({
+    page
+  }) => {
+    await enableReaderMode(page)
+
+    // 启用 lazyWillChange
+    const lazyToggle = page.locator('[data-testid="lazy-will-change-toggle"]')
+    await lazyToggle.check()
+    await expect(lazyToggle).toBeChecked()
+
+    const wrapper = page.locator('[data-testid="virtual-paper-wrapper"]')
+    const container = page.locator('[data-testid="virtual-paper-container"]')
+
+    // 重置滚动位置
+    await wrapper.evaluate((el) => {
+      el.scrollTop = 0
+    })
+
+    // 使用 CDP 触摸模拟进行单指滑动
+    const box = await wrapper.boundingBox()
+    expect(box).not.toBeNull()
+    if (box === null) throw new Error('Reader wrapper box unavailable')
+
+    const client = await page.context().newCDPSession(page)
+    await client.send('Emulation.setTouchEmulationEnabled', { enabled: true })
+
+    const x = box.x + box.width / 2
+    const startY = box.y + Math.min(box.height - 24, 260)
+    const endY = box.y + 48
+
+    await dispatchTouch(client, 'touchStart', [{ x, y: startY, id: 0 }])
+    await dispatchTouch(client, 'touchMove', [{ x, y: endY, id: 0 }])
+    await dispatchTouch(client, 'touchEnd', [{ x, y: endY, id: 0 }])
+
+    // 断言: wrapper 发生了原生滚动
+    await expect
+      .poll(async () => {
+        const layout = await readReaderLayout(page)
+        return layout.wrapper.scrollTop
+      })
+      .toBeGreaterThan(0)
+
+    // 断言: container 的 transform 仍然是 none（reader 模式不使用 transform 定位）
+    const transform = await container.evaluate(
+      (el) => getComputedStyle(el).transform
+    )
+    expect(transform).toBe('none')
+
+    // 断言: will-change 不是 transform（reader 模式使用原生滚动，不需要 transform 提示）
+    const willChange = await container.evaluate(
+      (el) => getComputedStyle(el).willChange
+    )
+    expect(willChange).not.toBe('transform')
+
+    await saveEvidence(page, 'reader-mode-touch-will-change-contract.png')
+  })
+
   test('keeps default transform mode CSS transform and wheel pan behavior', async ({
     page
   }) => {

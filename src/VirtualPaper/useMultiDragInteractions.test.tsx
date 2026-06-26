@@ -123,6 +123,7 @@ vi.mock('@system-ui-js/multi-drag', () => multiDragMock)
 
 type HarnessProps = Partial<UseVirtualPaperInteractionArgs> & {
   transform?: VirtualPaperTransform
+  beginTransform?: () => void
   updateTransform?: VirtualPaperTransformUpdater
   endTransform?: VirtualPaperTransformUpdater
   containMode?: boolean
@@ -137,6 +138,7 @@ function TestHarness({
   enabledInteractions = [VirtualPaperInteractionMode.MouseDragPan],
   minScale = 0.25,
   maxScale = 4,
+  beginTransform = vi.fn(),
   updateTransform = vi.fn(),
   endTransform = vi.fn(),
   containMode = false,
@@ -159,6 +161,7 @@ function TestHarness({
     minScale,
     maxScale,
     contentSize,
+    beginTransform,
     updateTransform,
     endTransform,
     containMode,
@@ -540,6 +543,30 @@ describe('useMultiDragInteractions', () => {
         phase: 'change'
       }
     )
+  })
+
+  it('starts the transform lifecycle when a two-finger touch zoom begins', () => {
+    const beginTransform = vi.fn()
+    const updateTransform = vi.fn()
+    const endTransform = vi.fn()
+    render(
+      <TestHarness
+        enabledInteractions={[VirtualPaperInteractionMode.TouchTwoFingerZoom]}
+        beginTransform={beginTransform}
+        updateTransform={updateTransform}
+        endTransform={endTransform}
+      />
+    )
+
+    const instance = getLastInstance()
+    const fingerA = makeFingerWithPoint('touch', true, { x: 100, y: 100 })
+    const fingerB = makeFingerWithPoint('touch', false, { x: 300, y: 100 })
+
+    instance.trigger('start', [fingerA, fingerB])
+
+    expect(beginTransform).toHaveBeenCalledTimes(1)
+    expect(updateTransform).not.toHaveBeenCalled()
+    expect(endTransform).not.toHaveBeenCalled()
   })
 
   // 复现双指缩放 TouchEnd 跳变 bug：

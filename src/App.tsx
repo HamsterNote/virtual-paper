@@ -37,6 +37,10 @@ export default function App() {
   // 等比缩放：开启后，大卡片内部尺寸随其视觉渲染宽度按比例缩放。
   const [proportionalScaling, setProportionalScaling] = useState(false)
 
+  // lazyWillChange：交互时动态应用 will-change: transform，交互结束后延迟指定毫秒移除。
+  const [lazyWillChangeEnabled, setLazyWillChangeEnabled] = useState(false)
+  const [lazyWillChangeMs, setLazyWillChangeMs] = useState('200')
+
   const [controlledX, setControlledX] = useState('0')
   const [controlledY, setControlledY] = useState('0')
   const [controlledScale, setControlledScale] = useState('1')
@@ -48,6 +52,14 @@ export default function App() {
    * 关闭时固定为 1，保持原始 Demo 视觉效果。
    */
   const proportionalScale = proportionalScaling ? readoutTransform.scale : 1
+
+  const parsedLazyWillChangeMs = Number.parseFloat(lazyWillChangeMs)
+  const activeLazyWillChangeMs =
+    lazyWillChangeEnabled &&
+    Number.isFinite(parsedLazyWillChangeMs) &&
+    parsedLazyWillChangeMs > 0
+      ? parsedLazyWillChangeMs
+      : 0
 
   const toggleMode = useCallback((mode: VirtualPaperInteractionMode) => {
     setEnabledInteractions((prev) =>
@@ -201,6 +213,41 @@ export default function App() {
         </section>
 
         <section className="control-section">
+          <h3>Lazy Will Change</h3>
+          <label className="mode-toggle">
+            <input
+              type="checkbox"
+              data-testid="lazy-will-change-toggle"
+              checked={lazyWillChangeEnabled}
+              onChange={(e) => {
+                setLazyWillChangeEnabled(e.target.checked)
+                setRemountKey((k) => k + 1)
+              }}
+            />
+            <span>启用 will-change 优化</span>
+          </label>
+
+          {lazyWillChangeEnabled && (
+            <div className="controlled-inputs">
+              <label>
+                Delay ms
+                <input
+                  type="number"
+                  min={0}
+                  step={50}
+                  data-testid="lazy-will-change-ms-input"
+                  value={lazyWillChangeMs}
+                  onChange={(e) => setLazyWillChangeMs(e.target.value)}
+                />
+              </label>
+              <div data-testid="lazy-will-change-readout">
+                lazyWillChange: {activeLazyWillChangeMs}ms
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="control-section">
           <h3>受控模式</h3>
           <label className="mode-toggle">
             <input
@@ -276,6 +323,7 @@ export default function App() {
           containerStyle={{ width: 600, height: 400 }}
           containMode={containMode}
           edgeElasticScroll={edgeElasticScroll}
+          lazyWillChange={activeLazyWillChangeMs}
           {...(isControlled ? { transform: controlledTransform } : {})}
           onTransformChange={handleTransformChange}
           {...(readerMode
