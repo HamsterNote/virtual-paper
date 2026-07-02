@@ -7,13 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.2] - 2026-07-02
+
+### 新增
+- 添加 `lazyWillChange` 属性，支持触摸手势时延迟应用 `will-change` 优化
+- 添加 `containMode` 约束模式
+- 添加惯性滚动和边缘弹性滚动功能
+
+### 变更
+- 简化滚动模式，采用原生滚动和双层 DOM 结构
+- 多拖拽惯性模式现在始终处于禁用状态
+- `edgeElasticScroll` 与 `readerMode` 继续保持支持
+- 绑定多拖拽 mixin 到 wrapper 以支持容器外的触摸事件
+
 ### 移除
 - 移除 `inertialScroll` 属性及相关支持
 - 移除演示中惯性滚动的开关
 
-### 变更
-- 多拖拽惯性模式现在始终处于禁用状态
-- `edgeElasticScroll` 与 `readerMode` 继续保持支持
+### 修复
+- 修复 reader-mode 原生滚动泄漏 transform-mode will-change 的问题
+- 修复边缘弹性回弹竞态问题并允许文字选择
+- 修复 PR #2 代码审查发现的多个问题
+- 修复双指捏合缩放时的触摸结束跳动问题
 
 ## [0.1.0-beta.1] - 2026-06-18
 
