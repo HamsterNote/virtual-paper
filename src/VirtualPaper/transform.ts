@@ -237,12 +237,10 @@ export const projectContainTransform = (
     scale: number,
     axisMargin: number
   ): number => {
-    // 任意维度非有限数 → 原样返回 desiredOffset，避免 NaN 传播
-    if (
-      ![desiredOffset, wrapperSize, containerSize, scale, axisMargin].every(
-        Number.isFinite
-      )
-    )
+    // 几何尺寸非有限数 → 原样返回 desiredOffset，避免 NaN 传播。
+    // margin 自身允许传入 NaN / Infinity / 负数，并在 getContainAxisLayout 中
+    // 统一规范化为 0；否则公开 API 一旦收到无效 margin，会意外绕过 containment。
+    if (![desiredOffset, wrapperSize, containerSize, scale].every(Number.isFinite))
       return desiredOffset
     // 零或负尺寸 → 原样返回 desiredOffset
     if (wrapperSize <= 0 || containerSize <= 0 || scale <= 0)
@@ -321,11 +319,9 @@ const getContainAxisBounds = (
   scale: number,
   axisMargin: number = 0
 ): ContainAxisBounds | null => {
-  if (
-    ![desiredOffset, wrapperSize, containerSize, scale, axisMargin].every(
-      Number.isFinite
-    )
-  )
+  // 与 projectContainTransform 保持一致：无效 margin 退化为 0，
+  // 不应让 bounds 计算直接失效，否则边缘弹性会跳过 containment。
+  if (![desiredOffset, wrapperSize, containerSize, scale].every(Number.isFinite))
     return null
   if (wrapperSize <= 0 || containerSize <= 0 || scale <= 0) return null
 

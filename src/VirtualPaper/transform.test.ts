@@ -891,6 +891,36 @@ describe('projectContainTransform with margin', () => {
     )
     expect(result.x).toBe(0)
   })
+
+  it('treats invalid margin values as zero instead of bypassing contain projection', () => {
+    const baseline = projectContainTransform(
+      { x: -999, y: 999, scale: 1 },
+      { width: 1200, height: 900 },
+      800,
+      600,
+      { x: 0, y: 0 }
+    )
+
+    expect(
+      projectContainTransform(
+        { x: -999, y: 999, scale: 1 },
+        { width: 1200, height: 900 },
+        800,
+        600,
+        { x: Number.NaN, y: Number.POSITIVE_INFINITY }
+      )
+    ).toEqual(baseline)
+
+    expect(
+      projectContainTransform(
+        { x: -999, y: 999, scale: 1 },
+        { width: 1200, height: 900 },
+        800,
+        600,
+        { x: -100, y: -50 }
+      )
+    ).toEqual(baseline)
+  })
 })
 
 describe('applyElasticContainResistance with margin', () => {
@@ -935,5 +965,25 @@ describe('applyElasticContainResistance with margin', () => {
     })
     expect(result.elasticTransform).toEqual({ x: 100, y: -350, scale: 1 })
     expect(result.targetTransform).toEqual({ x: 100, y: -350, scale: 1 })
+  })
+
+  it('falls back to zero margin when elastic contain receives invalid margin values', () => {
+    const baseline = applyElasticContainResistance({
+      transform: { x: 120, y: -500, scale: 1 },
+      containerSize: { width: 1200, height: 900 },
+      wrapperSize: { width: 800, height: 600 },
+      enabled: true,
+      margin: { x: 0, y: 0 }
+    })
+
+    const result = applyElasticContainResistance({
+      transform: { x: 120, y: -500, scale: 1 },
+      containerSize: { width: 1200, height: 900 },
+      wrapperSize: { width: 800, height: 600 },
+      enabled: true,
+      margin: { x: Number.NaN, y: Number.POSITIVE_INFINITY }
+    })
+
+    expect(result).toEqual(baseline)
   })
 })

@@ -122,6 +122,13 @@ const getReaderWheelZoomTransform = ({
 export function useWheelInteractions(
   args: UseVirtualPaperInteractionArgs
 ): void {
+  const {
+    containMode,
+    containMarginX = 0,
+    containMarginY = 0,
+    edgeElasticScroll = false,
+    isReaderMode = false
+  } = args
   const latestArgsRef = useRef(args)
   const wheelEndTimerRef = useRef<number | null>(null)
   const wheelEndStateRef = useRef<WheelEndState | null>(null)
@@ -211,6 +218,17 @@ export function useWheelInteractions(
     },
     [finishWheelTransform]
   )
+
+  const cancelPendingWheelElasticState = useCallback(() => {
+    if (wheelEndTimerRef.current !== null) {
+      window.clearTimeout(wheelEndTimerRef.current)
+      wheelEndTimerRef.current = null
+    }
+
+    wheelEndStateRef.current = null
+    elasticTargetTransformRef.current = null
+    cancelSettleAnimation()
+  }, [cancelSettleAnimation])
 
   const handleWheel = useCallback(
     (event: WheelEvent) => {
@@ -377,11 +395,26 @@ export function useWheelInteractions(
     return () => {
       wrapper.removeEventListener('wheel', handleWheel)
 
-      if (wheelEndTimerRef.current !== null) {
-        window.clearTimeout(wheelEndTimerRef.current)
-        wheelEndTimerRef.current = null
-      }
-      cancelSettleAnimation()
+      cancelPendingWheelElasticState()
     }
-  }, [cancelSettleAnimation, handleWheel])
+  }, [cancelPendingWheelElasticState, handleWheel])
+
+  useEffect(() => {
+    if (
+      settleCancelRef.current === null &&
+      wheelEndTimerRef.current === null &&
+      wheelEndStateRef.current === null
+    ) {
+      return
+    }
+
+    cancelPendingWheelElasticState()
+  }, [
+    cancelPendingWheelElasticState,
+    containMode,
+    containMarginX,
+    containMarginY,
+    edgeElasticScroll,
+    isReaderMode
+  ])
 }

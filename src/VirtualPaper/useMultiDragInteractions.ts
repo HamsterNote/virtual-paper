@@ -306,8 +306,20 @@ export function useMultiDragInteractions(
   useEffect(() => {
     if (!containMode || !edgeElasticScroll || isReaderMode) {
       cancelSettleAnimation()
+      return
     }
-  }, [containMode, edgeElasticScroll, isReaderMode, cancelSettleAnimation])
+
+    if (settleCancelRef.current !== null) {
+      cancelSettleAnimation()
+    }
+  }, [
+    containMode,
+    containMarginX,
+    containMarginY,
+    edgeElasticScroll,
+    isReaderMode,
+    cancelSettleAnimation
+  ])
 
   useEffect(() => {
     const element = wrapperRef.current

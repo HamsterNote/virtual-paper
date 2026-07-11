@@ -24,6 +24,8 @@ type WheelHarnessProps = {
   contentSize?: VirtualPaperContentSize
   isReaderMode?: boolean
   containMode?: boolean
+  containMarginX?: number
+  containMarginY?: number
   edgeElasticScroll?: boolean
   elasticActiveRef?: MutableRefObject<boolean>
   readerModeZoomDebounceMs?: number
@@ -41,6 +43,8 @@ function WheelHarness({
   contentSize,
   isReaderMode = false,
   containMode = false,
+  containMarginX = 0,
+  containMarginY = 0,
   edgeElasticScroll = false,
   elasticActiveRef,
   readerModeZoomDebounceMs,
@@ -69,6 +73,8 @@ function WheelHarness({
     endTransform: onEnd,
     isReaderMode,
     containMode,
+    containMarginX,
+    containMarginY,
     edgeElasticScroll,
     incrementElasticActive: () => {
       activeRef.current = true
@@ -1066,6 +1072,49 @@ describe('useWheelInteractions', () => {
         phase: 'end'
       })
     )
+    expect(elasticActiveRef.current).toBe(false)
+  })
+
+  it('containMode: margin changes cancel a pending edge-elastic wheel settle', () => {
+    vi.useFakeTimers()
+    const endTransform = vi.fn()
+    const elasticActiveRef = { current: false }
+    const { requestAnimationFrame, cancelAnimationFrame } =
+      installPausedAnimationFrame()
+    const harnessProps = {
+      enabledInteractions: [VirtualPaperInteractionMode.TrackpadScrollPan],
+      initialTransform: { x: 0, y: 0, scale: 1 },
+      containMode: true,
+      containMarginX: 0,
+      containMarginY: 0,
+      edgeElasticScroll: true,
+      elasticActiveRef,
+      onEnd: endTransform
+    }
+    const { rerender } = render(<WheelHarness {...harnessProps} />)
+
+    const wrapper = screen.getByTestId('wheel-wrapper')
+    const container = screen.getByTestId('wheel-container')
+    mockMeasurements(
+      wrapper,
+      container,
+      { width: 800, height: 600 },
+      { width: 1600, height: 1200 }
+    )
+
+    dispatchWheel(wrapper, { deltaX: -1000, deltaY: -700, ctrlKey: false })
+
+    act(() => {
+      vi.advanceTimersByTime(150)
+    })
+
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1)
+    expect(elasticActiveRef.current).toBe(true)
+
+    rerender(<WheelHarness {...harnessProps} containMarginX={120} />)
+
+    expect(cancelAnimationFrame).toHaveBeenCalledTimes(1)
+    expect(endTransform).not.toHaveBeenCalled()
     expect(elasticActiveRef.current).toBe(false)
   })
 
