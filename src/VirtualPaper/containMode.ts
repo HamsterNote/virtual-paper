@@ -1,5 +1,5 @@
 import { type VirtualPaperTransform } from './types'
-import { projectContainTransform } from './transform'
+import { type ContainMargin, projectContainTransform } from './transform'
 
 const MIN_SAFE_RECT_SCALE = 0.01
 
@@ -67,11 +67,13 @@ export function measureContainBox(
 /**
  * DOM-aware 版本的 projectContainTransform：
  * 先 measureContainBox，再调用纯 helper；测量失败时原样返回 transform。
+ * margin 默认 { x: 0, y: 0 }，保持向后兼容。
  */
 export function projectContainTransformForElements(
   transform: VirtualPaperTransform,
   wrapper: HTMLElement,
-  container: HTMLElement
+  container: HTMLElement,
+  margin: ContainMargin = { x: 0, y: 0 }
 ): VirtualPaperTransform {
   const box = measureContainBox(wrapper, container, transform.scale)
   if (!box) return transform
@@ -79,6 +81,7 @@ export function projectContainTransformForElements(
     transform,
     { width: box.containerWidth, height: box.containerHeight },
     box.wrapperWidth,
-    box.wrapperHeight
+    box.wrapperHeight,
+    margin
   )
 }

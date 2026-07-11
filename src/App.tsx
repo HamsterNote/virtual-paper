@@ -32,6 +32,9 @@ export default function App() {
 
   const [containMode, setContainMode] = useState(false)
 
+  const [containMarginX, setContainMarginX] = useState('0')
+  const [containMarginY, setContainMarginY] = useState('0')
+
   const [edgeElasticScroll, setEdgeElasticScroll] = useState(false)
 
   // 等比缩放：开启后，大卡片内部尺寸随其视觉渲染宽度按比例缩放。
@@ -60,6 +63,15 @@ export default function App() {
     parsedLazyWillChangeMs > 0
       ? parsedLazyWillChangeMs
       : 0
+
+  const parsedContainMarginX = Math.max(
+    0,
+    Number.parseFloat(containMarginX) || 0
+  )
+  const parsedContainMarginY = Math.max(
+    0,
+    Number.parseFloat(containMarginY) || 0
+  )
 
   const toggleMode = useCallback((mode: VirtualPaperInteractionMode) => {
     setEnabledInteractions((prev) =>
@@ -173,6 +185,36 @@ export default function App() {
             />
             <span>启用 contain mode</span>
           </label>
+
+          {containMode && (
+            <div className="controlled-inputs">
+              <label>
+                Margin X
+                <input
+                  type="number"
+                  min={0}
+                  step={10}
+                  data-testid="contain-margin-x-input"
+                  value={containMarginX}
+                  onChange={(e) => setContainMarginX(e.target.value)}
+                />
+              </label>
+              <label>
+                Margin Y
+                <input
+                  type="number"
+                  min={0}
+                  step={10}
+                  data-testid="contain-margin-y-input"
+                  value={containMarginY}
+                  onChange={(e) => setContainMarginY(e.target.value)}
+                />
+              </label>
+              <div data-testid="contain-margin-readout">
+                margin: {parsedContainMarginX}px / {parsedContainMarginY}px
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="control-section">
@@ -322,6 +364,8 @@ export default function App() {
           initialPlacement={initialPlacement}
           containerStyle={{ width: 600, height: 400 }}
           containMode={containMode}
+          containMarginX={parsedContainMarginX}
+          containMarginY={parsedContainMarginY}
           edgeElasticScroll={edgeElasticScroll}
           lazyWillChange={activeLazyWillChangeMs}
           {...(isControlled ? { transform: controlledTransform } : {})}

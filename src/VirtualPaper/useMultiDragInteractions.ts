@@ -223,6 +223,8 @@ export function useMultiDragInteractions(
     endTransform,
     isReaderMode,
     containMode,
+    containMarginX = 0,
+    containMarginY = 0,
     edgeElasticScroll = false,
     incrementElasticActive,
     decrementElasticActive,
@@ -238,6 +240,7 @@ export function useMultiDragInteractions(
   const endTransformRef = useRef(endTransform)
   const isReaderModeRef = useRef(isReaderMode)
   const containModeRef = useRef(containMode)
+  const containMarginRef = useRef({ x: containMarginX, y: containMarginY })
   const edgeElasticScrollRef = useRef(edgeElasticScroll)
   const incrementElasticActiveRef = useRef(incrementElasticActive)
   const decrementElasticActiveRef = useRef(decrementElasticActive)
@@ -276,6 +279,7 @@ export function useMultiDragInteractions(
   endTransformRef.current = endTransform
   isReaderModeRef.current = isReaderMode
   containModeRef.current = containMode
+  containMarginRef.current = { x: containMarginX, y: containMarginY }
   edgeElasticScrollRef.current = edgeElasticScroll
   incrementElasticActiveRef.current = incrementElasticActive
   decrementElasticActiveRef.current = decrementElasticActive
@@ -302,8 +306,20 @@ export function useMultiDragInteractions(
   useEffect(() => {
     if (!containMode || !edgeElasticScroll || isReaderMode) {
       cancelSettleAnimation()
+      return
     }
-  }, [containMode, edgeElasticScroll, isReaderMode, cancelSettleAnimation])
+
+    if (settleCancelRef.current !== null) {
+      cancelSettleAnimation()
+    }
+  }, [
+    containMode,
+    containMarginX,
+    containMarginY,
+    edgeElasticScroll,
+    isReaderMode,
+    cancelSettleAnimation
+  ])
 
   useEffect(() => {
     const element = wrapperRef.current
@@ -492,7 +508,8 @@ export function useMultiDragInteractions(
                 width: box.wrapperWidth,
                 height: box.wrapperHeight
               },
-              enabled: true
+              enabled: true,
+              margin: containMarginRef.current
             })
             elasticTargetTransform = elasticResult.targetTransform
             nextTransform = elasticResult.elasticTransform
@@ -510,7 +527,8 @@ export function useMultiDragInteractions(
           nextTransform = projectContainTransformForElements(
             nextTransform,
             wrapperRef.current,
-            containerRef.current
+            containerRef.current,
+            containMarginRef.current
           )
         }
       } else {

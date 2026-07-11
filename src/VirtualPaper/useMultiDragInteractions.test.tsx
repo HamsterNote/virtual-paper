@@ -142,6 +142,8 @@ function TestHarness({
   updateTransform = vi.fn(),
   endTransform = vi.fn(),
   containMode = false,
+  containMarginX = 0,
+  containMarginY = 0,
   contentSize,
   isReaderMode = false,
   edgeElasticScroll = false,
@@ -165,6 +167,8 @@ function TestHarness({
     updateTransform,
     endTransform,
     containMode,
+    containMarginX,
+    containMarginY,
     isReaderMode,
     edgeElasticScroll,
     incrementElasticActive: () => {
@@ -1134,6 +1138,48 @@ describe('useMultiDragInteractions', () => {
     // When: containMode is toggled off while that settle is still pending.
     rerender(<TestHarness {...harnessProps} containMode={false} />)
     // Then: the pending RAF is cancelled and the component handoff flag is cleared.
+    expect(cancelAnimationFrame).toHaveBeenCalledTimes(1)
+    expect(endTransform).not.toHaveBeenCalled()
+    expect(elasticActiveRef.current).toBe(false)
+  })
+
+  it('cancels a pending edge-elastic settle when contain margins change', () => {
+    const { requestAnimationFrame, cancelAnimationFrame } =
+      installPausedAnimationFrame()
+    const endTransform = vi.fn()
+    const elasticActiveRef = { current: false }
+    const harnessProps = {
+      transform: { x: 0, y: 0, scale: 1 },
+      enabledInteractions: [VirtualPaperInteractionMode.MouseDragPan],
+      endTransform,
+      edgeElasticScroll: true,
+      elasticActiveRef,
+      containMode: true,
+      containMarginX: 0,
+      containMarginY: 0
+    }
+    const { rerender } = render(<TestHarness {...harnessProps} />)
+
+    const wrapper = screen.getByTestId('wrapper')
+    const container = screen.getByTestId('container')
+    setupContainMocks(wrapper, container, {
+      wrapperWidth: 500,
+      wrapperHeight: 400,
+      containerWidth: 600,
+      containerHeight: 500
+    })
+
+    const instance = getLastInstance()
+    instance.trigger('start', [makeFinger('mouse')])
+    instance.options.setPoseOnEnd?.(container, {
+      position: { x: 110, y: 80 },
+      scale: 1
+    })
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1)
+    expect(elasticActiveRef.current).toBe(true)
+
+    rerender(<TestHarness {...harnessProps} containMarginX={40} />)
+
     expect(cancelAnimationFrame).toHaveBeenCalledTimes(1)
     expect(endTransform).not.toHaveBeenCalled()
     expect(elasticActiveRef.current).toBe(false)
