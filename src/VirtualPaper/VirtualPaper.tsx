@@ -56,6 +56,8 @@ export const VirtualPaper = ({
   renderMode,
   readerMode,
   containMode = false,
+  containMarginX = 0,
+  containMarginY = 0,
   edgeElasticScroll = false,
   readerModeZoomDebounceMs,
   lazyWillChange = 0,
@@ -128,6 +130,12 @@ export const VirtualPaper = ({
     setElasticActiveCount((count) => Math.max(0, count - 1))
   }, [])
 
+  // contain margin 对象，仅在值变化时重新创建
+  const containMargin = useMemo(
+    () => ({ x: containMarginX ?? 0, y: containMarginY ?? 0 }),
+    [containMarginX, containMarginY]
+  )
+
   const projectForContain = useCallback(
     (next: VirtualPaperTransform): VirtualPaperTransform => {
       if (!isContainMode) return next
@@ -136,9 +144,14 @@ export const VirtualPaper = ({
       const container = containerRef.current
       if (!wrapper || !container) return next
 
-      return projectContainTransformForElements(next, wrapper, container)
+      return projectContainTransformForElements(
+        next,
+        wrapper,
+        container,
+        containMargin
+      )
     },
-    [isContainMode]
+    [isContainMode, containMargin]
   )
 
   useLayoutEffect(() => {
@@ -216,6 +229,14 @@ export const VirtualPaper = ({
     window.addEventListener('resize', bumpContainRevision)
     return () => window.removeEventListener('resize', bumpContainRevision)
   }, [isContainMode, isReaderMode])
+
+  // margin 变化时刷新 contain 状态：重新投影 uncontrolled transform 并触发 display 重算。
+  // projectForContain 的 identity 随 containMargin 变化，因此作为依赖即可捕获所有 margin 变更。
+  useEffect(() => {
+    if (!isContainMode || isControlled) return
+    setContainRevision((revision) => revision + 1)
+    setUncontrolledTransform((prev) => projectForContain(prev))
+  }, [projectForContain, isContainMode, isControlled])
 
   const updateTransform = useCallback(
     (next: VirtualPaperTransform, meta: VirtualPaperTransformMeta) => {
@@ -487,6 +508,8 @@ export const VirtualPaper = ({
     endTransform,
     isReaderMode,
     containMode: isContainMode,
+    containMarginX,
+    containMarginY,
     edgeElasticScroll,
     incrementElasticActive,
     decrementElasticActive,
@@ -506,6 +529,8 @@ export const VirtualPaper = ({
     endTransform,
     isReaderMode,
     containMode: isContainMode,
+    containMarginX,
+    containMarginY,
     edgeElasticScroll,
     incrementElasticActive,
     decrementElasticActive,

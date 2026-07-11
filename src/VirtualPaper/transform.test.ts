@@ -776,3 +776,164 @@ describe('applyElasticContainResistance', () => {
     expect(Number.isNaN(result.elasticTransform.y)).toBe(false)
   })
 })
+
+describe('projectContainTransform with margin', () => {
+  // margin=0 的默认行为与无 margin 参数完全等价（向后兼容）
+  it('default margin {x:0, y:0} produces identical result to omitting margin', () => {
+    const noMargin = projectContainTransform(
+      { x: -999, y: 999, scale: 1 },
+      { width: 200, height: 100 },
+      800,
+      600
+    )
+    const zeroMargin = projectContainTransform(
+      { x: -999, y: 999, scale: 1 },
+      { width: 200, height: 100 },
+      800,
+      600,
+      { x: 0, y: 0 }
+    )
+    expect(zeroMargin).toEqual(noMargin)
+  })
+
+  // container fit 时在 margin 内居中
+  it('centers container inside margin-reduced area when container fits', () => {
+    // wrapper 800x600, marginX=100 → effective 600, marginY=50 → effective 500
+    // container 200x100 @ scale=1: fits → center at 100 + (600-200)/2 = 300, 50 + (500-100)/2 = 250
+    const result = projectContainTransform(
+      { x: -999, y: 999, scale: 1 },
+      { width: 200, height: 100 },
+      800,
+      600,
+      { x: 100, y: 50 }
+    )
+    expect(result.x).toBe(300)
+    expect(result.y).toBe(250)
+    expect(result.scale).toBe(1)
+  })
+
+  // container overflow 时 clamp 到 margin 内边界
+  it('clamps oversized container within margin bounds', () => {
+    // wrapper 800x600, marginX=100 → effective 600, marginY=50 → effective 500
+    // container 1200x900 @ scale=1: overflows both axes
+    // minX = 800 - 100 - 1200 = -500, maxX = 100
+    // minY = 600 - 50 - 900 = -350, maxY = 50
+    // x=-999 低于 min → clamp 到 minX=-500
+    // y=999 超过 max → clamp 到 maxY=50
+    const result = projectContainTransform(
+      { x: -999, y: 999, scale: 1 },
+      { width: 1200, height: 900 },
+      800,
+      600,
+      { x: 100, y: 50 }
+    )
+    expect(result.x).toBe(-500)
+    expect(result.y).toBe(50)
+  })
+
+  // clamp 时 max 上界从 0 变为 margin
+  it('clamps upper bound to margin offset instead of 0', () => {
+    // wrapper 800, marginX=100, container 1200 @ scale=1
+    // max = marginX = 100, so x=999 clamps to 100
+    const result = projectContainTransform(
+      { x: 999, y: 999, scale: 1 },
+      { width: 1200, height: 100 },
+      800,
+      600,
+      { x: 100, y: 0 }
+    )
+    expect(result.x).toBe(100)
+  })
+
+  // 仅设置 X margin 时 Y 轴不受影响
+  it('only X margin affects X axis, Y stays unmarginized', () => {
+    // Y axis: container 100 height in wrapper 600 → center at 250 (no margin)
+    // X axis: marginX=100, container 200 → center at 100 + (600-200)/2 = 300
+    const result = projectContainTransform(
+      { x: -999, y: 999, scale: 1 },
+      { width: 200, height: 100 },
+      800,
+      600,
+      { x: 100, y: 0 }
+    )
+    expect(result.x).toBe(300)
+    expect(result.y).toBe(250)
+  })
+
+  // margin 过大导致 effective 区域 ≤ 0 时取中点
+  it('returns midpoint when margin exceeds half the wrapper size', () => {
+    // wrapper 800, marginX=500 → effective = max(0, 800-1000) = 0
+    // container 200 @ scale=1: scaledSize=200 > effective=0 → overflow
+    // min = 800 - 500 - 200 = 100, max = 500, min < max → clamp to [100, 500]
+    // But effective=0, so container always "overflows" → clamp to bounds
+    const result = projectContainTransform(
+      { x: 999, y: 999, scale: 1 },
+      { width: 200, height: 100 },
+      800,
+      600,
+      { x: 500, y: 0 }
+    )
+    // min=100, max=500, desired=999 → clamp to max=500
+    expect(result.x).toBe(500)
+  })
+
+  it('returns midpoint when both margins exceed wrapper (min > max)', () => {
+    // wrapper 800, marginX=600 → effective = max(0, 800-1200) = 0
+    // container 200 @ scale=1: overflow
+    // min = 800 - 600 - 200 = 0, max = 600
+    // min(0) < max(600) → clamp [0, 600], desired=-999 → clamp to min=0
+    const result = projectContainTransform(
+      { x: -999, y: 999, scale: 1 },
+      { width: 200, height: 100 },
+      800,
+      600,
+      { x: 600, y: 0 }
+    )
+    expect(result.x).toBe(0)
+  })
+})
+
+describe('applyElasticContainResistance with margin', () => {
+  it('centers fitted content within margin-reduced area', () => {
+    // wrapper 800x600, margin {x:100, y:50}
+    // container 200x100 fits → center at (300, 250)
+    const result = applyElasticContainResistance({
+      transform: { x: -999, y: 999, scale: 1 },
+      containerSize: { width: 200, height: 100 },
+      wrapperSize: { width: 800, height: 600 },
+      enabled: true,
+      margin: { x: 100, y: 50 }
+    })
+    expect(result.elasticTransform).toEqual({ x: 300, y: 250, scale: 1 })
+    expect(result.targetTransform).toEqual({ x: 300, y: 250, scale: 1 })
+  })
+
+  it('resists beyond margin bounds on oversized content', () => {
+    // wrapper 800x600, margin {x:100, y:50}
+    // container 1200x900 overflow → bounds: minX=800-100-1200=-500, maxX=100
+    // desired x=200 > maxX=100 → elastic: 100 + (200-100)*0.55 = 155
+    // minY=600-50-900=-350, maxY=50, desired y=-500 < minY=-350 → elastic: -350+(-500-(-350))*0.55 = -432.5
+    const result = applyElasticContainResistance({
+      transform: { x: 200, y: -500, scale: 1 },
+      containerSize: { width: 1200, height: 900 },
+      wrapperSize: { width: 800, height: 600 },
+      enabled: true,
+      margin: { x: 100, y: 50 }
+    })
+    expect(result.elasticTransform.x).toBeCloseTo(155, 5)
+    expect(result.elasticTransform.y).toBe(-432.5)
+    expect(result.targetTransform).toEqual({ x: 100, y: -350, scale: 1 })
+  })
+
+  it('disabled elasticity still projects to margin bounds', () => {
+    const result = applyElasticContainResistance({
+      transform: { x: 999, y: -999, scale: 1 },
+      containerSize: { width: 1200, height: 900 },
+      wrapperSize: { width: 800, height: 600 },
+      enabled: false,
+      margin: { x: 100, y: 50 }
+    })
+    expect(result.elasticTransform).toEqual({ x: 100, y: -350, scale: 1 })
+    expect(result.targetTransform).toEqual({ x: 100, y: -350, scale: 1 })
+  })
+})

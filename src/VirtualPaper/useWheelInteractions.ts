@@ -225,6 +225,8 @@ export function useWheelInteractions(
         updateTransform,
         isReaderMode,
         containMode,
+        containMarginX = 0,
+        containMarginY = 0,
         edgeElasticScroll,
         readerModeZoomDebounceMs
       } = latestArgsRef.current
@@ -320,7 +322,8 @@ export function useWheelInteractions(
                 width: box.wrapperWidth,
                 height: box.wrapperHeight
               },
-              enabled: true
+              enabled: true,
+              margin: { x: containMarginX, y: containMarginY }
             })
             elasticTargetTransformRef.current = elasticResult.targetTransform
             nextTransform = elasticResult.elasticTransform
@@ -340,7 +343,8 @@ export function useWheelInteractions(
           nextTransform = projectContainTransformForElements(
             nextTransform,
             wrapper,
-            containerRef.current
+            containerRef.current,
+            { x: containMarginX, y: containMarginY }
           )
         }
       } else {

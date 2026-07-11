@@ -190,35 +190,81 @@ export const computeReaderLayoutMetrics = (
 }
 
 /**
+ * contain 模式下的安全边距（px）。
+ * x 控制左右各 marginX px 的内缩区域；y 控制上下各 marginY px 的内缩区域。
+ * 默认 0 表示 container 贴满 wrapper 边缘。
+ */
+export type ContainMargin = { x: number; y: number }
+
+/**
+ * 将 margin 规范化为有限非负值，避免 NaN / Infinity / 负数破坏几何计算。
+ */
+const sanitizeMargin = (margin: number): number =>
+  Number.isFinite(margin) && margin > 0 ? margin : 0
+
+/**
+ * contain 模式下单轴的安全边距展开。
+ * 返回 effectiveWrapperSize（可用宽度）以及 margin 起始偏移。
+ */
+const getContainAxisLayout = (
+  wrapperSize: number,
+  margin: number
+): { effectiveSize: number; offset: number } => {
+  const safeMargin = sanitizeMargin(margin)
+  // margin 不应超过 wrapperSize 的一半，否则有效区域为 0
+  const effectiveSize = Math.max(0, wrapperSize - 2 * safeMargin)
+  return { effectiveSize, offset: safeMargin }
+}
+
+/**
  * 纯几何 helper：将 transform 投影到 "contain" 约束下。
- * 当 container * scale <= wrapper 时居中；否则 clamp 到 [wrapper - scaledSize, 0]。
+ * 当 container * scale <= effectiveWrapper（wrapper 减去两侧 margin）时居中；
+ * 否则 clamp 到 [wrapper - margin - scaledSize, margin]。
+ * margin 默认 { x: 0, y: 0 }，保持向后兼容。
  * 不修改 scale，不进行四舍五入。
  */
 export const projectContainTransform = (
   transform: VirtualPaperTransform,
   containerSize: { width: number; height: number },
   wrapperWidth: number,
-  wrapperHeight: number
+  wrapperHeight: number,
+  margin: ContainMargin = { x: 0, y: 0 }
 ): VirtualPaperTransform => {
   const projectContainAxis = (
     desiredOffset: number,
     wrapperSize: number,
     containerSize: number,
-    scale: number
+    scale: number,
+    axisMargin: number
   ): number => {
     // 任意维度非有限数 → 原样返回 desiredOffset，避免 NaN 传播
     if (
-      ![desiredOffset, wrapperSize, containerSize, scale].every(Number.isFinite)
+      ![desiredOffset, wrapperSize, containerSize, scale, axisMargin].every(
+        Number.isFinite
+      )
     )
       return desiredOffset
     // 零或负尺寸 → 原样返回 desiredOffset
     if (wrapperSize <= 0 || containerSize <= 0 || scale <= 0)
       return desiredOffset
+
+    const { effectiveSize, offset } = getContainAxisLayout(
+      wrapperSize,
+      axisMargin
+    )
     const scaledSize = containerSize * scale
-    // container 缩放后 ≤ wrapper → 居中
-    if (scaledSize <= wrapperSize) return (wrapperSize - scaledSize) / 2
-    // container 缩放后 > wrapper → clamp 到 [wrapper - scaledSize, 0]
-    return Math.min(Math.max(desiredOffset, wrapperSize - scaledSize), 0)
+
+    // container 缩放后 ≤ 有效区域 → 在 margin 内居中
+    if (scaledSize <= effectiveSize) {
+      return offset + (effectiveSize - scaledSize) / 2
+    }
+
+    // container 缩放后 > 有效区域 → clamp 到 [wrapperSize - offset - scaledSize, offset]
+    const min = wrapperSize - offset - scaledSize
+    const max = offset
+    // margin 过大导致 min > max 时（有效区域为负），取中点避免反转
+    if (min > max) return (min + max) / 2
+    return Math.min(Math.max(desiredOffset, min), max)
   }
 
   return {
@@ -226,13 +272,15 @@ export const projectContainTransform = (
       transform.x,
       wrapperWidth,
       containerSize.width,
-      transform.scale
+      transform.scale,
+      margin.x
     ),
     y: projectContainAxis(
       transform.y,
       wrapperHeight,
       containerSize.height,
-      transform.scale
+      transform.scale,
+      margin.y
     ),
     scale: transform.scale
   }
@@ -255,6 +303,10 @@ export type ElasticContainResistanceOptions = {
   readonly containerSize: ElasticContainSize
   readonly wrapperSize: ElasticContainSize
   readonly enabled: boolean
+  /**
+   * contain 模式安全边距；默认 { x: 0, y: 0 } 保持向后兼容。
+   */
+  readonly margin?: ContainMargin
 }
 
 export type ElasticContainResistanceResult = {
@@ -266,22 +318,34 @@ const getContainAxisBounds = (
   desiredOffset: number,
   wrapperSize: number,
   containerSize: number,
-  scale: number
+  scale: number,
+  axisMargin: number = 0
 ): ContainAxisBounds | null => {
   if (
-    ![desiredOffset, wrapperSize, containerSize, scale].every(Number.isFinite)
+    ![desiredOffset, wrapperSize, containerSize, scale, axisMargin].every(
+      Number.isFinite
+    )
   )
     return null
   if (wrapperSize <= 0 || containerSize <= 0 || scale <= 0) return null
 
+  const { effectiveSize, offset } = getContainAxisLayout(wrapperSize, axisMargin)
   const scaledSize = containerSize * scale
   if (!Number.isFinite(scaledSize)) return null
-  if (scaledSize <= wrapperSize) {
-    const centerOffset = (wrapperSize - scaledSize) / 2
+
+  if (effectiveSize > 0 && scaledSize <= effectiveSize) {
+    const centerOffset = offset + (effectiveSize - scaledSize) / 2
     return { min: centerOffset, max: centerOffset }
   }
 
-  return { min: wrapperSize - scaledSize, max: 0 }
+  const minBound = wrapperSize - offset - scaledSize
+  const maxBound = offset
+  // margin 过大导致 minBound > maxBound → 取中点退化为单点边界
+  if (minBound > maxBound) {
+    const mid = (minBound + maxBound) / 2
+    return { min: mid, max: mid }
+  }
+  return { min: minBound, max: maxBound }
 }
 
 const applyContainAxisResistance = (
@@ -308,13 +372,15 @@ export const applyElasticContainResistance = ({
   transform,
   containerSize,
   wrapperSize,
-  enabled
+  enabled,
+  margin = { x: 0, y: 0 }
 }: ElasticContainResistanceOptions): ElasticContainResistanceResult => {
   const targetTransform = projectContainTransform(
     transform,
     containerSize,
     wrapperSize.width,
-    wrapperSize.height
+    wrapperSize.height,
+    margin
   )
 
   if (!enabled) {
@@ -330,7 +396,8 @@ export const applyElasticContainResistance = ({
           transform.x,
           wrapperSize.width,
           containerSize.width,
-          transform.scale
+          transform.scale,
+          margin.x
         )
       ),
       y: applyContainAxisResistance(
@@ -340,7 +407,8 @@ export const applyElasticContainResistance = ({
           transform.y,
           wrapperSize.height,
           containerSize.height,
-          transform.scale
+          transform.scale,
+          margin.y
         )
       ),
       scale: transform.scale

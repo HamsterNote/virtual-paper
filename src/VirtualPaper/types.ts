@@ -74,6 +74,18 @@ export type VirtualPaperProps = {
    */
   containMode?: boolean
   /**
+   * contain 模式下的水平安全边距（左右各 marginX px）。
+   * container 在 contain 约束投影时不会进入该边距区域，视觉效果类似 padding。
+   * 仅在 containMode 为 true 且非 readerMode 时生效。默认 0。
+   */
+  containMarginX?: number
+  /**
+   * contain 模式下的垂直安全边距（上下各 marginY px）。
+   * container 在 contain 约束投影时不会进入该边距区域，视觉效果类似 padding。
+   * 仅在 containMode 为 true 且非 readerMode 时生效。默认 0。
+   */
+  containMarginY?: number
+  /**
    * 启用边缘弹性滚动；默认 false。这里只暴露 API 开关，具体行为由交互 hook 决定。
    */
   edgeElasticScroll?: boolean
@@ -135,6 +147,14 @@ export type UseVirtualPaperInteractionArgs = {
    * 非阅读模式下启用 contain 约束；默认 false。isReaderMode 为 true 时忽略。
    */
   containMode?: boolean
+  /**
+   * contain 模式下的水平安全边距（左右各 marginX px）。默认 0。
+   */
+  containMarginX?: number
+  /**
+   * contain 模式下的垂直安全边距（上下各 marginY px）。默认 0。
+   */
+  containMarginY?: number
   /**
    * 启用边缘弹性滚动；默认 false。
    */
