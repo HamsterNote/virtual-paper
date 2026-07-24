@@ -28,6 +28,8 @@
     "build:lib": "vite build --config vite.lib.config.ts",
     "build:demo": "yarn build",
     "build:all": "yarn build:lib && yarn build:demo",
+    "prepublishOnly": "yarn build:lib",
+    "pack:check": "node scripts/check-pack.mjs",
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",

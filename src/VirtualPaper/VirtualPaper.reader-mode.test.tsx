@@ -7,6 +7,7 @@ import {
   computeReaderLayoutMetrics,
   convertTransformToLayout
 } from './transform'
+import { VirtualPaperInteractionMode } from './types'
 import { useMultiDragInteractions } from './useMultiDragInteractions'
 import { useWheelInteractions } from './useWheelInteractions'
 
@@ -689,5 +690,73 @@ describe('VirtualPaper readerMode', () => {
     // The scroll handler should recognize this as a programmatic echo
     // and skip the transform update entirely.
     expect(onTransformChange).not.toHaveBeenCalled()
+  })
+
+  it('Z1: reader zoom previews with anchored CSS transform and commits layout only on end', () => {
+    const onTransformChange = vi.fn()
+    const onTransformChangeEnd = vi.fn()
+    render(
+      <VirtualPaper
+        readerMode
+        defaultTransform={{ x: -200, y: -300, scale: 1 }}
+        contentSize={{ width: 1000, height: 2000 }}
+        onTransformChange={onTransformChange}
+        onTransformChangeEnd={onTransformChangeEnd}
+      >
+        <div>child</div>
+      </VirtualPaper>
+    )
+
+    const wrapper = screen.getByTestId('virtual-paper-wrapper')
+    const container = screen.getByTestId('virtual-paper-container')
+    const wheelCalls = vi.mocked(useWheelInteractions).mock.calls
+    const wheelArgs = wheelCalls[wheelCalls.length - 1][0]
+    const previewReaderZoom = Reflect.get(wheelArgs, 'previewReaderZoom')
+    const target = { x: -350, y: -650, scale: 2 }
+
+    expect(previewReaderZoom).toBeTypeOf('function')
+    if (typeof previewReaderZoom !== 'function') return
+
+    act(() => {
+      previewReaderZoom(
+        { transform: target, origin: { x: 125, y: 150 } },
+        {
+          source: VirtualPaperInteractionMode.MouseWheelCtrlZoom,
+          inputType: 'wheel',
+          phase: 'change'
+        }
+      )
+    })
+
+    expect(container.style.width).toBe('1000px')
+    expect(container.style.height).toBe('2000px')
+    expect(wrapper.scrollLeft).toBe(200)
+    expect(wrapper.scrollTop).toBe(300)
+    expect(container.style.transformOrigin).toBe('325px 450px')
+    expect(container.style.transform).toBe(
+      'translate3d(175px, 100px, 0) scale(2)'
+    )
+    expect(onTransformChange).toHaveBeenLastCalledWith(
+      target,
+      expect.objectContaining({ phase: 'change' })
+    )
+
+    act(() => {
+      wheelArgs.endTransform(target, {
+        source: VirtualPaperInteractionMode.MouseWheelCtrlZoom,
+        inputType: 'wheel',
+        phase: 'end'
+      })
+    })
+
+    expect(container.style.width).toBe('2000px')
+    expect(container.style.height).toBe('4000px')
+    expect(wrapper.scrollLeft).toBe(350)
+    expect(wrapper.scrollTop).toBe(650)
+    expect(container.style.transform).toBe('')
+    expect(onTransformChangeEnd).toHaveBeenLastCalledWith(
+      target,
+      expect.objectContaining({ phase: 'end' })
+    )
   })
 })

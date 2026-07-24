@@ -241,6 +241,7 @@ export function useWheelInteractions(
         minScale,
         maxScale,
         updateTransform,
+        previewReaderZoom,
         isReaderMode,
         containMode,
         containMarginX = 0,
@@ -266,13 +267,17 @@ export function useWheelInteractions(
           wrapper
         ) {
           source = VirtualPaperInteractionMode.MouseWheelCtrlZoom
+          const currentTransform =
+            isReaderMode && wheelEndStateRef.current
+              ? wheelEndStateRef.current.transform
+              : transform
           nextTransform =
             isReaderMode && contentSize
               ? getReaderWheelZoomTransform({
                   event,
                   wrapper,
                   contentSize,
-                  current: transform,
+                  current: currentTransform,
                   minScale,
                   maxScale
                 })
@@ -371,7 +376,22 @@ export function useWheelInteractions(
       }
 
       event.preventDefault()
-      updateTransform(nextTransform, createWheelMeta(source, 'change'))
+      const changeMeta = createWheelMeta(source, 'change')
+      if (isReaderMode && wrapper && previewReaderZoom) {
+        const wrapperRect = wrapper.getBoundingClientRect()
+        previewReaderZoom(
+          {
+            transform: nextTransform,
+            origin: {
+              x: event.clientX - wrapperRect.left,
+              y: event.clientY - wrapperRect.top
+            }
+          },
+          changeMeta
+        )
+      } else {
+        updateTransform(nextTransform, changeMeta)
+      }
       scheduleWheelEnd(
         nextTransform,
         source,

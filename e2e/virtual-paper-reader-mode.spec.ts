@@ -32,6 +32,10 @@ type ReaderLayoutSnapshot = {
     readonly height: number
     readonly marginLeft: number
     readonly marginTop: number
+    readonly inlineWidth: string
+    readonly inlineHeight: string
+    readonly transform: string
+    readonly transformOrigin: string
   }
 }
 
@@ -141,7 +145,11 @@ async function readReaderLayout(page: Page): Promise<ReaderLayoutSnapshot> {
         width: containerRect.width,
         height: containerRect.height,
         marginLeft: Number.parseFloat(containerStyle.marginLeft) || 0,
-        marginTop: Number.parseFloat(containerStyle.marginTop) || 0
+        marginTop: Number.parseFloat(containerStyle.marginTop) || 0,
+        inlineWidth: container.style.width,
+        inlineHeight: container.style.height,
+        transform: containerStyle.transform,
+        transformOrigin: containerStyle.transformOrigin
       }
     }
   })
@@ -329,6 +337,123 @@ test.describe('VirtualPaper readerMode', () => {
     await saveEvidence(page, 'reader-mode-ctrl-wheel-zoom.png')
   })
 
+  test('previews wheel zoom with an anchored transform before committing layout', async ({
+    page
+  }) => {
+    await enableReaderMode(page)
+
+    const before = await readReaderLayout(page)
+    const beforeTransform = await readTransform(page)
+    const expectedOrigin = {
+      x:
+        WHEEL_ANCHOR_INSIDE_WRAPPER.clientX -
+        before.wrapper.left +
+        before.wrapper.scrollLeft -
+        before.container.marginLeft,
+      y:
+        WHEEL_ANCHOR_INSIDE_WRAPPER.clientY -
+        before.wrapper.top +
+        before.wrapper.scrollTop -
+        before.container.marginTop
+    }
+
+    await dispatchReaderWheel(page, -220)
+    await expect
+      .poll(async () => (await readTransform(page)).scale)
+      .toBeGreaterThan(beforeTransform.scale)
+
+    const preview = await readReaderLayout(page)
+    expect(preview.container.inlineWidth).toBe(before.container.inlineWidth)
+    expect(preview.container.inlineHeight).toBe(before.container.inlineHeight)
+    expect(preview.wrapper.scrollLeft).toBe(before.wrapper.scrollLeft)
+    expect(preview.wrapper.scrollTop).toBe(before.wrapper.scrollTop)
+    expect(preview.container.transform).not.toBe('none')
+
+    const [originX, originY] = preview.container.transformOrigin
+      .split(' ')
+      .map(Number.parseFloat)
+    expect(originX).toBeCloseTo(expectedOrigin.x, 1)
+    expect(originY).toBeCloseTo(expectedOrigin.y, 1)
+
+    await expect
+      .poll(async () => (await readReaderLayout(page)).container.transform)
+      .toBe('none')
+
+    const committed = await readReaderLayout(page)
+    expect(committed.container.inlineWidth).not.toBe(before.container.inlineWidth)
+    expect(committed.container.inlineHeight).not.toBe(before.container.inlineHeight)
+
+    await saveEvidence(page, 'reader-mode-wheel-preview-commit.png')
+  })
+
+  test('uses the initial two-finger center as origin and commits immediately on lift', async ({
+    page
+  }) => {
+    await enableReaderMode(page)
+
+    const wrapper = page.locator('[data-testid="virtual-paper-wrapper"]')
+    const box = await wrapper.boundingBox()
+    expect(box).not.toBeNull()
+    if (box === null) throw new Error('Reader wrapper box unavailable')
+
+    const before = await readReaderLayout(page)
+    const startCenter = {
+      x: box.x + box.width / 2,
+      y: box.y + box.height / 2
+    }
+    const expectedOrigin = {
+      x:
+        startCenter.x -
+        before.wrapper.left +
+        before.wrapper.scrollLeft -
+        before.container.marginLeft,
+      y:
+        startCenter.y -
+        before.wrapper.top +
+        before.wrapper.scrollTop -
+        before.container.marginTop
+    }
+    const client = await page.context().newCDPSession(page)
+    await client.send('Emulation.setTouchEmulationEnabled', { enabled: true })
+
+    await dispatchTouch(client, 'touchStart', [
+      { x: startCenter.x - 60, y: startCenter.y, id: 0 },
+      { x: startCenter.x + 60, y: startCenter.y, id: 1 }
+    ])
+    await dispatchTouch(client, 'touchMove', [
+      { x: startCenter.x - 90 + 40, y: startCenter.y + 30, id: 0 },
+      { x: startCenter.x + 90 + 40, y: startCenter.y + 30, id: 1 }
+    ])
+
+    await expect
+      .poll(async () => (await readReaderLayout(page)).container.transform)
+      .not.toBe('none')
+
+    const preview = await readReaderLayout(page)
+    expect(preview.container.inlineWidth).toBe(before.container.inlineWidth)
+    expect(preview.container.inlineHeight).toBe(before.container.inlineHeight)
+    expect(preview.wrapper.scrollLeft).toBe(before.wrapper.scrollLeft)
+    expect(preview.wrapper.scrollTop).toBe(before.wrapper.scrollTop)
+
+    const [originX, originY] = preview.container.transformOrigin
+      .split(' ')
+      .map(Number.parseFloat)
+    expect(originX).toBeCloseTo(expectedOrigin.x, 1)
+    expect(originY).toBeCloseTo(expectedOrigin.y, 1)
+
+    await dispatchTouch(client, 'touchEnd', [])
+
+    await expect
+      .poll(async () => (await readReaderLayout(page)).container.transform)
+      .toBe('none')
+
+    const committed = await readReaderLayout(page)
+    expect(committed.container.inlineWidth).not.toBe(before.container.inlineWidth)
+    expect(committed.container.inlineHeight).not.toBe(before.container.inlineHeight)
+
+    await saveEvidence(page, 'reader-mode-touch-preview-commit.png')
+  })
+
   test('centers fit reader content with native margins and zero scroll', async ({
     page
   }) => {
@@ -347,6 +472,9 @@ test.describe('VirtualPaper readerMode', () => {
     await expect
       .poll(async () => (await readTransform(page)).scale)
       .toBeLessThanOrEqual(0.7)
+    await expect
+      .poll(async () => (await readReaderLayout(page)).container.transform)
+      .toBe('none')
 
     const transform = await readTransform(page)
     const layout = await readReaderLayout(page)
@@ -387,6 +515,9 @@ test.describe('VirtualPaper readerMode', () => {
     await expect
       .poll(async () => (await readTransform(page)).scale)
       .toBeLessThan(initial.scale)
+    await expect
+      .poll(async () => (await readReaderLayout(page)).container.transform)
+      .toBe('none')
 
     const wrapper = page.locator('[data-testid="virtual-paper-wrapper"]')
     const mixedAxisLayout = await readReaderLayout(page)

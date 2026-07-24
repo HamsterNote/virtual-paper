@@ -10,6 +10,7 @@ import {
 import type { CSSProperties } from 'react'
 import type {
   VirtualPaperProps,
+  VirtualPaperReaderZoomPreview,
   VirtualPaperTransform,
   VirtualPaperTransformMeta
 } from './types'
@@ -103,6 +104,9 @@ export const VirtualPaper = ({
     width: number
     height: number
   } | null>(null)
+  const [readerZoomPreview, setReaderZoomPreview] =
+    useState<VirtualPaperReaderZoomPreview | null>(null)
+  const readerZoomBaseTransformRef = useRef<VirtualPaperTransform | null>(null)
   const [elasticActiveCount, setElasticActiveCount] = useState(0)
   const elasticActive = elasticActiveCount > 0
 
@@ -191,6 +195,8 @@ export const VirtualPaper = ({
   }, [])
 
   const transform = isControlled ? controlledTransform : uncontrolledTransform
+  const transformRef = useRef(transform)
+  transformRef.current = transform
   const displayTransform = useMemo(() => {
     void containRevision
     const renderElasticTransform =
@@ -257,6 +263,18 @@ export const VirtualPaper = ({
     [isControlled, onTransformChange, clearWillChangeTimer]
   )
 
+  const previewReaderZoom = useCallback(
+    (
+      preview: VirtualPaperReaderZoomPreview,
+      meta: VirtualPaperTransformMeta
+    ) => {
+      readerZoomBaseTransformRef.current ??= transformRef.current
+      setReaderZoomPreview(preview)
+      onTransformChange?.(preview.transform, meta)
+    },
+    [onTransformChange]
+  )
+
   const beginTransform = useCallback(() => {
     if (
       !isReaderModeRef.current &&
@@ -271,6 +289,10 @@ export const VirtualPaper = ({
     (next: VirtualPaperTransform, meta: VirtualPaperTransformMeta) => {
       if (!isControlled) {
         setUncontrolledTransform(next)
+      }
+      if (isReaderModeRef.current) {
+        readerZoomBaseTransformRef.current = null
+        setReaderZoomPreview(null)
       }
       if (onTransformChangeEnd) {
         onTransformChangeEnd(next, meta)
@@ -315,6 +337,7 @@ export const VirtualPaper = ({
 
   useLayoutEffect(() => {
     if (!isReaderMode) return
+    if (readerZoomPreview) return
     const wrapper = wrapperRef.current
     if (!wrapper) return
     const nextWidth = wrapper.clientWidth
@@ -354,16 +377,11 @@ export const VirtualPaper = ({
     if (wrapper.scrollTop !== targetTop) {
       wrapper.scrollTop = targetTop
     }
-  }, [getReaderContentSize, isReaderMode, transform])
+  }, [getReaderContentSize, isReaderMode, readerZoomPreview, transform])
 
   // 用 ref 持有最新 transform，避免 scroll handler 闭包过期。
   // 场景：滚动期间触发 ctrl+wheel 缩放时，闭包里的 transform.scale 会过期，
   // 后续 scroll 事件会用 stale scale 覆盖最新值，导致缩放被回退。
-  const transformRef = useRef(transform)
-  useLayoutEffect(() => {
-    transformRef.current = transform
-  }, [transform])
-
   useEffect(() => {
     if (!isReaderMode) return
     const wrapper = wrapperRef.current
@@ -506,6 +524,7 @@ export const VirtualPaper = ({
     beginTransform,
     updateTransform,
     endTransform,
+    previewReaderZoom,
     isReaderMode,
     containMode: isContainMode,
     containMarginX,
@@ -527,6 +546,7 @@ export const VirtualPaper = ({
     beginTransform,
     updateTransform,
     endTransform,
+    previewReaderZoom,
     isReaderMode,
     containMode: isContainMode,
     containMarginX,
@@ -543,13 +563,47 @@ export const VirtualPaper = ({
     const measuredHeight =
       readerWrapperSize?.height ?? wrapper?.clientHeight ?? 0
     const readerContentSize = getReaderContentSize()
+    const readerLayoutTransform =
+      readerZoomBaseTransformRef.current ?? transform
     const readerMetrics = computeReaderLayoutMetrics(
       readerContentSize,
-      transform.scale,
+      readerLayoutTransform.scale,
       measuredWidth,
       measuredHeight,
-      transform
+      readerLayoutTransform
     )
+
+    const previewStyles: CSSProperties = {}
+    if (readerZoomPreview) {
+      const targetMetrics = computeReaderLayoutMetrics(
+        readerContentSize,
+        readerZoomPreview.transform.scale,
+        measuredWidth,
+        measuredHeight,
+        readerZoomPreview.transform
+      )
+      const scaleRatio =
+        readerZoomPreview.transform.scale / readerLayoutTransform.scale
+      const originX =
+        readerZoomPreview.origin.x +
+        readerMetrics.scrollLeft -
+        readerMetrics.offsetX
+      const originY =
+        readerZoomPreview.origin.y +
+        readerMetrics.scrollTop -
+        readerMetrics.offsetY
+      const targetLeft = targetMetrics.offsetX - targetMetrics.scrollLeft
+      const targetTop = targetMetrics.offsetY - targetMetrics.scrollTop
+      const baseLeft = readerMetrics.offsetX - readerMetrics.scrollLeft
+      const baseTop = readerMetrics.offsetY - readerMetrics.scrollTop
+      const translateX =
+        targetLeft - baseLeft - (1 - scaleRatio) * originX
+      const translateY =
+        targetTop - baseTop - (1 - scaleRatio) * originY
+      previewStyles.transformOrigin = `${originX}px ${originY}px`
+      previewStyles.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${scaleRatio})`
+      previewStyles.willChange = 'transform'
+    }
 
     const readerWrapperStyles: CSSProperties = {
       ...baseWrapperStyle,
@@ -566,7 +620,8 @@ export const VirtualPaper = ({
       width: readerMetrics.width,
       height: readerMetrics.height,
       marginLeft: readerMetrics.offsetX,
-      marginTop: readerMetrics.offsetY
+      marginTop: readerMetrics.offsetY,
+      ...previewStyles
     }
     return (
       <div

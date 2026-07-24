@@ -29,6 +29,12 @@ export default function App() {
   const [remountKey, setRemountKey] = useState(0)
 
   const [readerMode, setReaderMode] = useState(false)
+  const [readerContentScale, setReaderContentScale] = useState(1)
+
+  const remountPaper = useCallback(() => {
+    setReaderContentScale(1)
+    setRemountKey((key) => key + 1)
+  }, [])
 
   const [containMode, setContainMode] = useState(false)
 
@@ -50,11 +56,16 @@ export default function App() {
 
   /**
    * 等比缩放系数：
-   * 开启等比缩放时，使用 VirtualPaper 通过 onTransformChange 报告的 scale。
-   * 大卡片视觉宽度 = containerStyle.width * scale，内部尺寸按同一比例缩放。
-   * 关闭时固定为 1，保持原始 Demo 视觉效果。
+   * 阅读模式使用最终提交值，避免预览 transform 与内部尺寸重复缩放；
+   * 普通模式仅在开启等比缩放后跟随实时 transform。
    */
-  const proportionalScale = proportionalScaling ? readoutTransform.scale : 1
+  const proportionalScale = readerMode
+    ? isControlled
+      ? controlledTransform.scale
+      : readerContentScale
+    : proportionalScaling
+      ? readoutTransform.scale
+      : 1
 
   const parsedLazyWillChangeMs = Number.parseFloat(lazyWillChangeMs)
   const activeLazyWillChangeMs =
@@ -82,9 +93,9 @@ export default function App() {
   const handlePlacementChange = useCallback(
     (placement: VirtualPaperInitialPlacement) => {
       setInitialPlacement(placement)
-      setRemountKey((k) => k + 1)
+      remountPaper()
     },
-    []
+    [remountPaper]
   )
 
   const handleControlledToggle = useCallback(
@@ -107,14 +118,31 @@ export default function App() {
   }, [controlledX, controlledY, controlledScale])
 
   const handleReset = useCallback(() => {
-    setRemountKey((k) => k + 1)
-  }, [])
+    if (isControlled) {
+      const resetTransform = { x: 0, y: 0, scale: 1 }
+      setControlledTransform(resetTransform)
+      setReadoutTransform(resetTransform)
+      setControlledX('0')
+      setControlledY('0')
+      setControlledScale('1')
+    }
+    remountPaper()
+  }, [isControlled, remountPaper])
 
   const handleTransformChange = useCallback(
     (transform: VirtualPaperTransform) => {
       setReadoutTransform(transform)
     },
     []
+  )
+
+  const handleTransformChangeEnd = useCallback(
+    (transform: VirtualPaperTransform) => {
+      if (readerMode && !isControlled) {
+        setReaderContentScale(transform.scale)
+      }
+    },
+    [isControlled, readerMode]
   )
 
   return (
@@ -164,7 +192,7 @@ export default function App() {
               checked={readerMode}
               onChange={(e) => {
                 setReaderMode(e.target.checked)
-                setRemountKey((k) => k + 1)
+                remountPaper()
               }}
             />
             <span>启用阅读模式</span>
@@ -180,7 +208,7 @@ export default function App() {
               checked={containMode}
               onChange={(e) => {
                 setContainMode(e.target.checked)
-                setRemountKey((k) => k + 1)
+                remountPaper()
               }}
             />
             <span>启用 contain mode</span>
@@ -226,7 +254,7 @@ export default function App() {
               checked={edgeElasticScroll}
               onChange={(e) => {
                 setEdgeElasticScroll(e.target.checked)
-                setRemountKey((k) => k + 1)
+                remountPaper()
               }}
             />
             <span>启用边缘弹性滚动</span>
@@ -242,7 +270,7 @@ export default function App() {
               checked={proportionalScaling}
               onChange={(e) => {
                 setProportionalScaling(e.target.checked)
-                setRemountKey((k) => k + 1)
+                remountPaper()
               }}
             />
             <span>启用等比缩放</span>
@@ -263,7 +291,7 @@ export default function App() {
               checked={lazyWillChangeEnabled}
               onChange={(e) => {
                 setLazyWillChangeEnabled(e.target.checked)
-                setRemountKey((k) => k + 1)
+                remountPaper()
               }}
             />
             <span>启用 will-change 优化</span>
@@ -370,6 +398,7 @@ export default function App() {
           lazyWillChange={activeLazyWillChangeMs}
           {...(isControlled ? { transform: controlledTransform } : {})}
           onTransformChange={handleTransformChange}
+          onTransformChangeEnd={handleTransformChangeEnd}
           {...(readerMode
             ? {
                 readerMode: true,

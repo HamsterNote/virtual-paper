@@ -11,6 +11,7 @@ import { useWheelInteractions } from './useWheelInteractions'
 import { computeReaderLayoutMetrics } from './transform'
 import {
   type VirtualPaperContentSize,
+  type VirtualPaperReaderZoomPreviewUpdater,
   type VirtualPaperTransform,
   type VirtualPaperTransformUpdater,
   VirtualPaperInteractionMode
@@ -31,6 +32,7 @@ type WheelHarnessProps = {
   readerModeZoomDebounceMs?: number
   onUpdate?: VirtualPaperTransformUpdater
   onEnd?: VirtualPaperTransformUpdater
+  onPreview?: VirtualPaperReaderZoomPreviewUpdater
 }
 
 const defaultTransform = { x: 10, y: 20, scale: 1 }
@@ -49,7 +51,8 @@ function WheelHarness({
   elasticActiveRef,
   readerModeZoomDebounceMs,
   onUpdate = () => undefined,
-  onEnd = () => undefined
+  onEnd = () => undefined,
+  onPreview
 }: WheelHarnessProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -71,6 +74,7 @@ function WheelHarness({
       setTransform(next)
     },
     endTransform: onEnd,
+    previewReaderZoom: onPreview,
     isReaderMode,
     containMode,
     containMarginX,
@@ -713,6 +717,52 @@ describe('useWheelInteractions', () => {
 
     const next = onUpdate.mock.calls[0][0] as VirtualPaperTransform
     expect(next.scale).toBe(4)
+  })
+
+  it('readerMode: previews consecutive ctrl-wheel zooms from the latest target at the current pointer', () => {
+    const onPreview = vi.fn()
+    const onUpdate = vi.fn()
+    render(
+      <WheelHarness
+        enabledInteractions={[VirtualPaperInteractionMode.MouseWheelCtrlZoom]}
+        initialTransform={{ x: 0, y: 0, scale: 1 }}
+        contentSize={{ width: 1200, height: 900 }}
+        isReaderMode
+        onPreview={onPreview}
+        onUpdate={onUpdate}
+      />
+    )
+    const wrapper = screen.getByTestId('wheel-wrapper')
+    const container = screen.getByTestId('wheel-container')
+    mockMeasurements(wrapper, container, wrapperSize, { width: 1200, height: 900 })
+    vi.spyOn(wrapper, 'getBoundingClientRect').mockReturnValue(
+      createRect(10, 20)
+    )
+
+    dispatchWheel(wrapper, {
+      clientX: 210,
+      clientY: 170,
+      deltaY: -100,
+      ctrlKey: true
+    })
+    dispatchWheel(wrapper, {
+      clientX: 310,
+      clientY: 270,
+      deltaY: -100,
+      ctrlKey: true
+    })
+
+    expect(onUpdate).not.toHaveBeenCalled()
+    expect(onPreview).toHaveBeenCalledTimes(2)
+    expect(onPreview.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ origin: { x: 200, y: 150 } })
+    )
+    expect(onPreview.mock.calls[1][0]).toEqual(
+      expect.objectContaining({ origin: { x: 300, y: 250 } })
+    )
+    const firstScale = onPreview.mock.calls[0][0].transform.scale
+    const secondScale = onPreview.mock.calls[1][0].transform.scale
+    expect(secondScale).toBeCloseTo(firstScale * Math.exp(100 * 0.002))
   })
 
   it('readerMode: ctrl+wheel zoom is clamped to minScale', () => {

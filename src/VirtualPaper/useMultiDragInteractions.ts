@@ -11,8 +11,7 @@ import {
 import {
   applyElasticContainResistance,
   clampReaderTransform,
-  clampScale,
-  validateReaderModeZoomDebounceMs
+  clampScale
 } from './transform'
 import {
   measureContainBox,
@@ -221,14 +220,14 @@ export function useMultiDragInteractions(
     beginTransform,
     updateTransform,
     endTransform,
+    previewReaderZoom,
     isReaderMode,
     containMode,
     containMarginX = 0,
     containMarginY = 0,
     edgeElasticScroll = false,
     incrementElasticActive,
-    decrementElasticActive,
-    readerModeZoomDebounceMs
+    decrementElasticActive
   } = args
 
   const transformRef = useRef(transform)
@@ -238,14 +237,13 @@ export function useMultiDragInteractions(
   const beginTransformRef = useRef(beginTransform)
   const updateTransformRef = useRef(updateTransform)
   const endTransformRef = useRef(endTransform)
+  const previewReaderZoomRef = useRef(previewReaderZoom)
   const isReaderModeRef = useRef(isReaderMode)
   const containModeRef = useRef(containMode)
   const containMarginRef = useRef({ x: containMarginX, y: containMarginY })
   const edgeElasticScrollRef = useRef(edgeElasticScroll)
   const incrementElasticActiveRef = useRef(incrementElasticActive)
   const decrementElasticActiveRef = useRef(decrementElasticActive)
-  const readerModeZoomDebounceMsRef = useRef(readerModeZoomDebounceMs)
-  const readerZoomEndTimerRef = useRef<number | null>(null)
   const settleCancelRef = useRef<(() => void) | null>(null)
   const activeGestureRef = useRef<ActivePointerGesture | null>(null)
   // 保留最后一次非 null 的手势描述。
@@ -277,13 +275,13 @@ export function useMultiDragInteractions(
   beginTransformRef.current = beginTransform
   updateTransformRef.current = updateTransform
   endTransformRef.current = endTransform
+  previewReaderZoomRef.current = previewReaderZoom
   isReaderModeRef.current = isReaderMode
   containModeRef.current = containMode
   containMarginRef.current = { x: containMarginX, y: containMarginY }
   edgeElasticScrollRef.current = edgeElasticScroll
   incrementElasticActiveRef.current = incrementElasticActive
   decrementElasticActiveRef.current = decrementElasticActive
-  readerModeZoomDebounceMsRef.current = readerModeZoomDebounceMs
 
   const flags = getPointerModeFlags(enabledInteractions)
   const {
@@ -327,37 +325,6 @@ export function useMultiDragInteractions(
 
     let mixin: Mixin | null = null
     const touchActionBeforeMixin = element.style.touchAction
-
-    const cancelReaderZoomEnd = () => {
-      if (readerZoomEndTimerRef.current !== null) {
-        window.clearTimeout(readerZoomEndTimerRef.current)
-        readerZoomEndTimerRef.current = null
-      }
-    }
-
-    const scheduleReaderZoomEnd = (
-      transform: VirtualPaperTransform,
-      meta: {
-        source: VirtualPaperInteractionModeType
-        inputType: 'pointer'
-        phase: 'end'
-      }
-    ) => {
-      cancelReaderZoomEnd()
-
-      const debounceMs = validateReaderModeZoomDebounceMs(
-        readerModeZoomDebounceMsRef.current
-      )
-      if (debounceMs === 0) {
-        endTransformRef.current(transform, meta)
-        return
-      }
-
-      readerZoomEndTimerRef.current = window.setTimeout(() => {
-        endTransformRef.current(transform, meta)
-        readerZoomEndTimerRef.current = null
-      }, debounceMs)
-    }
 
     const getPose = (target: HTMLElement): Pose => {
       const rect = target.getBoundingClientRect()
@@ -551,7 +518,8 @@ export function useMultiDragInteractions(
           isReaderModeRef.current &&
           source === VirtualPaperInteractionMode.TouchTwoFingerZoom
         ) {
-          scheduleReaderZoomEnd(nextTransform, endMeta)
+          transformRef.current = nextTransform
+          endTransformRef.current(nextTransform, endMeta)
           clearFinalEndFallback()
           return
         }
@@ -580,7 +548,19 @@ export function useMultiDragInteractions(
         setElasticActive(false)
       }
       transformRef.current = nextTransform
-      updateTransformRef.current(nextTransform, meta)
+      if (
+        isReaderModeRef.current &&
+        source === VirtualPaperInteractionMode.TouchTwoFingerZoom &&
+        segment &&
+        previewReaderZoomRef.current
+      ) {
+        previewReaderZoomRef.current(
+          { transform: nextTransform, origin: segment.startMid },
+          meta
+        )
+      } else {
+        updateTransformRef.current(nextTransform, meta)
+      }
     }
 
     const options: Options = {
@@ -646,7 +626,6 @@ export function useMultiDragInteractions(
     }
     const clearGesture = () => {
       clearGestureState(true)
-      cancelReaderZoomEnd()
     }
     const clearFinalEndFallback = () => {
       if ((mixin?.getFingers() ?? []).length > 0) return
@@ -712,7 +691,6 @@ export function useMultiDragInteractions(
       didScaleDuringGestureRef.current = false
       singlePanBlockedAfterMultiRef.current = false
       cancelSettleAnimation()
-      cancelReaderZoomEnd()
       mixin?.destroy()
       if (containerEl && !flags.mouseDragPan) {
         containerEl.removeEventListener('pointerdown', blockMousePointerDown)
