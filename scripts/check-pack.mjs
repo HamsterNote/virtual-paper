@@ -69,7 +69,11 @@ function getPackedFiles() {
     parsed = JSON.parse(stdout)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    throw new Error(`Failed to parse npm pack JSON output: ${message}`)
+    const parseError = new Error(
+      `Failed to parse npm pack JSON output: ${message}`
+    )
+    parseError.cause = error
+    throw parseError
   }
 
   if (!Array.isArray(parsed) || parsed.length === 0) {
@@ -131,13 +135,12 @@ try {
       'Allowed paths: dist/**, package.json, README.md, LICENSE, CHANGELOG.md'
     )
 
-    console.error(messageLines.join('\n'))
-    process.exit(1)
+    throw new Error(messageLines.join('\n'))
   }
 
   console.log(`Pack check passed with ${packedFiles.length} files.`)
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error)
   console.error(message)
-  process.exit(1)
+  process.exitCode = 1
 }
