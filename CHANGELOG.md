@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-07-25
+
+### 新增
+- reader mode 支持原生滚动与触摸缩放
+- reader mode 支持基于 CSS transform 的缩放预览
+
+### 修复
+- 改进 CI 发布流程中的 semver 解析与错误处理
+
 ## [0.2.0] - 2026-07-11
 
 ### 新增
