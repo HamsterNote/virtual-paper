@@ -64,8 +64,7 @@ async function dispatchTouch(
       force: 1,
       id: point.id
     })),
-    modifiers: 0,
-    timestamp: Date.now()
+    modifiers: 0
   })
 }
 
@@ -273,10 +272,11 @@ test.describe('VirtualPaper readerMode', () => {
     await saveEvidence(page, 'reader-mode-native-scroll-sync.png')
   })
 
-  test('scrolls with browser-native single-finger touch pan in readerMode', async ({
+  test('keeps browser-native momentum after a single-finger touch pan ends', async ({
     page
   }) => {
     await enableReaderMode(page)
+    await zoomReaderPastScale(page, 2)
 
     const singlePanToggle = page.locator(
       '[data-testid="mode-toggle-TouchSingleFingerPan"]'
@@ -288,6 +288,9 @@ test.describe('VirtualPaper readerMode', () => {
 
     const wrapper = page.locator('[data-testid="virtual-paper-wrapper"]')
     const container = page.locator('[data-testid="virtual-paper-container"]')
+    await expect
+      .poll(async () => (await readReaderLayout(page)).container.transform)
+      .toBe('none')
     await expect(wrapper).toHaveCSS('touch-action', /pan-x|pan-y/)
     await expect(container).toHaveCSS('touch-action', /pan-x|pan-y/)
 
@@ -295,8 +298,25 @@ test.describe('VirtualPaper readerMode', () => {
     expect(box).not.toBeNull()
     if (box === null) throw new Error('Reader wrapper box unavailable')
 
+    await wrapper.evaluate(async (el) => {
+      const settled = new Promise<void>((resolve) => {
+        el.addEventListener('scrollend', () => resolve(), { once: true })
+      })
+      el.scrollTop = 120
+      await settled
+    })
     await wrapper.evaluate((el) => {
-      el.scrollTop = 0
+      const timeline: Array<{ readonly type: string; readonly time: number }> = []
+      for (const type of ['touchend', 'scroll', 'scrollend']) {
+        el.addEventListener(
+          type,
+          () => {
+            timeline.push({ type, time: performance.now() })
+            el.dataset.momentumTimeline = JSON.stringify(timeline)
+          },
+          { passive: true }
+        )
+      }
     })
 
     const client = await page.context().newCDPSession(page)
@@ -304,21 +324,70 @@ test.describe('VirtualPaper readerMode', () => {
 
     const x = box.x + box.width / 2
     const startY = box.y + Math.min(box.height - 24, 260)
-    const endY = box.y + 48
+    const moveOffsets = [8, 20, 38, 62, 92, 128]
 
     await dispatchTouch(client, 'touchStart', [{ x, y: startY, id: 0 }])
-    await dispatchTouch(client, 'touchMove', [{ x, y: endY, id: 0 }])
-    await dispatchTouch(client, 'touchEnd', [{ x, y: endY, id: 0 }])
+    for (const offset of moveOffsets) {
+      await page.waitForTimeout(8)
+      await dispatchTouch(client, 'touchMove', [
+        { x, y: startY - offset, id: 0 }
+      ])
+    }
+
+    await dispatchTouch(client, 'touchEnd', [])
+
+    // Then: 原生 touch pan 在抬手后继续推进，不被 React transform 同步截停。
+    await expect
+      .poll(async () => {
+        return wrapper.evaluate((el) => {
+          const timeline = JSON.parse(el.dataset.momentumTimeline ?? '[]') as Array<{
+            readonly type: string
+            readonly time: number
+          }>
+          const touchEnd = timeline.find((entry) => entry.type === 'touchend')
+          if (!touchEnd) return false
+
+          return timeline.some(
+            (entry) =>
+              entry.type === 'scroll' && entry.time >= touchEnd.time + 50
+          )
+        })
+      })
+      .toBe(true)
 
     await expect
       .poll(async () => {
-        const layout = await readReaderLayout(page)
-        return layout.wrapper.scrollTop
-      })
-      .toBeGreaterThan(0)
+        return wrapper.evaluate((el) => {
+          const timeline = JSON.parse(el.dataset.momentumTimeline ?? '[]') as Array<{
+            readonly type: string
+            readonly time: number
+          }>
+          const touchEnd = timeline.find((entry) => entry.type === 'touchend')
+          if (!touchEnd) return false
 
-    const transform = await readTransform(page)
-    expect(transform.y).toBeLessThan(0)
+          return timeline.some(
+            (entry) =>
+              entry.type === 'scrollend' && entry.time >= touchEnd.time
+          )
+        })
+      })
+      .toBe(true)
+
+    await expect
+      .poll(async () => {
+        const [transform, layout] = await Promise.all([
+          readTransform(page),
+          readReaderLayout(page)
+        ])
+        return Math.abs(transform.y + layout.wrapper.scrollTop)
+      })
+      .toBeLessThanOrEqual(1)
+    const containerPosition = await container.evaluate((element) => ({
+      left: element.style.left,
+      top: element.style.top,
+      transform: window.getComputedStyle(element).transform
+    }))
+    expect(containerPosition).toEqual({ left: '', top: '', transform: 'none' })
 
     await saveEvidence(page, 'reader-mode-touch-pan-scroll.png')
   })
@@ -340,7 +409,17 @@ test.describe('VirtualPaper readerMode', () => {
   test('previews wheel zoom with an anchored transform before committing layout', async ({
     page
   }) => {
+    await expect(
+      page.locator('[data-testid="reader-transform-origin-debug-point"]')
+    ).toHaveCount(0)
+
     await enableReaderMode(page)
+
+    const originMarker = page.locator(
+      '[data-testid="reader-transform-origin-debug-point"]'
+    )
+    await expect(originMarker).toBeVisible()
+    await expect(originMarker).toHaveCSS('pointer-events', 'none')
 
     const before = await readReaderLayout(page)
     const beforeTransform = await readTransform(page)
@@ -374,6 +453,21 @@ test.describe('VirtualPaper readerMode', () => {
       .map(Number.parseFloat)
     expect(originX).toBeCloseTo(expectedOrigin.x, 1)
     expect(originY).toBeCloseTo(expectedOrigin.y, 1)
+    await expect
+      .poll(async () => {
+        const markerPosition = await originMarker.evaluate((element) => ({
+          left: Number.parseFloat(element.style.left),
+          top: Number.parseFloat(element.style.top)
+        }))
+
+        return {
+          left: Math.round(markerPosition.left),
+          top: Math.round(markerPosition.top)
+        }
+      })
+      .toEqual({ left: Math.round(originX), top: Math.round(originY) })
+
+    await saveEvidence(page, 'reader-mode-transform-origin-debug-point.png')
 
     await expect
       .poll(async () => (await readReaderLayout(page)).container.transform)
@@ -386,7 +480,7 @@ test.describe('VirtualPaper readerMode', () => {
     await saveEvidence(page, 'reader-mode-wheel-preview-commit.png')
   })
 
-  test('uses the initial two-finger center as origin and commits immediately on lift', async ({
+  test('zooms smoothly outward and inward around the initial two-finger center', async ({
     page
   }) => {
     await enableReaderMode(page)
@@ -416,14 +510,63 @@ test.describe('VirtualPaper readerMode', () => {
     const client = await page.context().newCDPSession(page)
     await client.send('Emulation.setTouchEmulationEnabled', { enabled: true })
 
+    await wrapper.evaluate((element) => {
+      const events: string[] = []
+      const record = (event: Event) => {
+        const pointerEvent = event as PointerEvent
+        events.push(
+          `${event.type}:${pointerEvent.pointerId}:${pointerEvent.clientX}:${pointerEvent.clientY}`
+        )
+        element.dataset.pointerEvents = JSON.stringify(events)
+      }
+      for (const type of [
+        'pointerdown',
+        'pointermove',
+        'pointerup',
+        'pointercancel'
+      ]) {
+        element.addEventListener(type, record)
+      }
+    })
+    await dispatchTouch(client, 'touchStart', [
+      { x: startCenter.x - 60, y: startCenter.y, id: 0 }
+    ])
     await dispatchTouch(client, 'touchStart', [
       { x: startCenter.x - 60, y: startCenter.y, id: 0 },
       { x: startCenter.x + 60, y: startCenter.y, id: 1 }
     ])
-    await dispatchTouch(client, 'touchMove', [
-      { x: startCenter.x - 90 + 40, y: startCenter.y + 30, id: 0 },
-      { x: startCenter.x + 90 + 40, y: startCenter.y + 30, id: 1 }
-    ])
+    const scaleSamples: number[] = []
+    for (const distance of [140, 160, 180, 160, 140, 100]) {
+      await dispatchTouch(client, 'touchMove', [
+        {
+          x: startCenter.x - distance / 2,
+          y: startCenter.y,
+          id: 0
+        },
+        {
+          x: startCenter.x + distance / 2,
+          y: startCenter.y,
+          id: 1
+        }
+      ])
+      await page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      )
+      scaleSamples.push((await readTransform(page)).scale)
+    }
+
+    expect(scaleSamples.slice(0, 3)).toEqual(
+      [...scaleSamples.slice(0, 3)].sort((left, right) => left - right)
+    )
+    expect(scaleSamples.slice(2)).toEqual(
+      [...scaleSamples.slice(2)].sort((left, right) => right - left)
+    )
+    expect(Math.max(...scaleSamples)).toBeLessThan(2)
+    expect(scaleSamples[scaleSamples.length - 1]).toBeLessThan(1)
+    const pointerEvents = JSON.parse(
+      (await wrapper.getAttribute('data-pointer-events')) ?? '[]'
+    ) as string[]
+    expect(pointerEvents.some((event) => event.startsWith('pointercancel'))).toBe(false)
 
     await expect
       .poll(async () => (await readReaderLayout(page)).container.transform)
@@ -434,6 +577,13 @@ test.describe('VirtualPaper readerMode', () => {
     expect(preview.container.inlineHeight).toBe(before.container.inlineHeight)
     expect(preview.wrapper.scrollLeft).toBe(before.wrapper.scrollLeft)
     expect(preview.wrapper.scrollTop).toBe(before.wrapper.scrollTop)
+    const previewPosition = await page
+      .locator('[data-testid="virtual-paper-container"]')
+      .evaluate((element) => ({
+        left: element.style.left,
+        top: element.style.top
+      }))
+    expect(previewPosition).toEqual({ left: '', top: '' })
 
     const [originX, originY] = preview.container.transformOrigin
       .split(' ')
@@ -452,6 +602,104 @@ test.describe('VirtualPaper readerMode', () => {
     expect(committed.container.inlineHeight).not.toBe(before.container.inlineHeight)
 
     await saveEvidence(page, 'reader-mode-touch-preview-commit.png')
+  })
+
+  test('starts a reversible pinch after native one-finger scrolling has begun', async ({
+    page
+  }) => {
+    await enableReaderMode(page)
+
+    const wrapper = page.locator('[data-testid="virtual-paper-wrapper"]')
+    const box = await wrapper.boundingBox()
+    expect(box).not.toBeNull()
+    if (box === null) throw new Error('Reader wrapper box unavailable')
+
+    await wrapper.evaluate((element) => {
+      const pointerEvents: string[] = []
+      const touchEvents: string[] = []
+      for (const type of [
+        'pointerdown',
+        'pointermove',
+        'pointerup',
+        'pointercancel'
+      ]) {
+        element.addEventListener(type, (event) => {
+          const pointerEvent = event as PointerEvent
+          pointerEvents.push(`${type}:${pointerEvent.pointerId}`)
+          element.dataset.pointerEvents = JSON.stringify(pointerEvents)
+        })
+      }
+      for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+        element.addEventListener(type, (event) => {
+          const touchEvent = event as TouchEvent
+          touchEvents.push(
+            `${type}:${Array.from(touchEvent.touches)
+              .map((touch) => `${touch.identifier}@${touch.clientX},${touch.clientY}`)
+              .join('|')}`
+          )
+          element.dataset.touchEvents = JSON.stringify(touchEvents)
+        })
+      }
+    })
+
+    const client = await page.context().newCDPSession(page)
+    await client.send('Emulation.setTouchEmulationEnabled', { enabled: true })
+    const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    const first = { x: center.x - 60, y: center.y, id: 0 }
+    const scrolledFirst = { ...first, y: center.y - 80 }
+
+    // Given: 第一根手指已经移动并让浏览器开始原生滚动。
+    await dispatchTouch(client, 'touchStart', [first])
+    await dispatchTouch(client, 'touchMove', [scrolledFirst])
+    await expect
+      .poll(async () => (await readReaderLayout(page)).wrapper.scrollTop)
+      .toBeGreaterThan(0)
+    const baselineScale = (await readTransform(page)).scale
+
+    // When: 第二根手指加入，并先向外再向内移动。
+    const second = { x: center.x + 60, y: scrolledFirst.y, id: 1 }
+    await dispatchTouch(client, 'touchStart', [scrolledFirst, second])
+    await dispatchTouch(client, 'touchMove', [
+      { ...scrolledFirst, x: center.x - 90 },
+      { ...second, x: center.x + 90 }
+    ])
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    )
+    const outwardScale = (await readTransform(page)).scale
+    await dispatchTouch(client, 'touchMove', [
+      { ...scrolledFirst, x: center.x - 40 },
+      { ...second, x: center.x + 40 }
+    ])
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    )
+    const eventTrace = await wrapper.evaluate((element) => ({
+      pointerEvents: JSON.parse(element.dataset.pointerEvents ?? '[]') as string[],
+      touchEvents: JSON.parse(element.dataset.touchEvents ?? '[]') as string[]
+    }))
+
+    // Then: 原生滚动接管后加入的双指手势仍可放大并反向缩小。
+    expect(outwardScale, JSON.stringify(eventTrace)).toBeGreaterThan(
+      baselineScale
+    )
+    await expect
+      .poll(async () => (await readTransform(page)).scale, {
+        message: JSON.stringify(eventTrace)
+      })
+      .toBeLessThan(baselineScale)
+    const inwardScale = (await readTransform(page)).scale
+
+    await dispatchTouch(client, 'touchEnd', [])
+    await expect
+      .poll(async () => (await readReaderLayout(page)).container.transform)
+      .toBe('none')
+
+    // Then: 晚到的 scrollend/fallback 不能用旧滚动姿态覆盖已提交的 pinch。
+    await page.waitForTimeout(180)
+    await expect
+      .poll(async () => (await readTransform(page)).scale)
+      .toBeCloseTo(inwardScale, 3)
   })
 
   test('centers fit reader content with native margins and zero scroll', async ({

@@ -148,6 +148,41 @@ button {
   overflow: hidden;
 }
 
+.reader-transform-origin-debug-point {
+  position: absolute;
+  z-index: 10;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #e23d28;
+  box-shadow:
+    0 0 0 2px #e23d28,
+    0 2px 8px rgba(37, 35, 31, 0.35);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.reader-transform-origin-debug-point::before,
+.reader-transform-origin-debug-point::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: #e23d28;
+  content: '';
+  transform: translate(-50%, -50%);
+}
+
+.reader-transform-origin-debug-point::before {
+  width: 24px;
+  height: 2px;
+}
+
+.reader-transform-origin-debug-point::after {
+  width: 2px;
+  height: 24px;
+}
+
 /* ---- Transform readout ---- */
 
 [data-testid='transform-readout'] {

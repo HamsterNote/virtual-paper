@@ -6,6 +6,7 @@ import {
   DEFAULT_ENABLED_INTERACTIONS
 } from './index'
 import type { VirtualPaperTransform } from './index'
+import { ReaderTransformOriginDebugPoint } from './ReaderTransformOriginDebugPoint'
 
 const ALL_MODES = Object.values(VirtualPaperInteractionMode)
 
@@ -407,6 +408,7 @@ export default function App() {
               }
             : {})}
         >
+          {readerMode ? <ReaderTransformOriginDebugPoint /> : null}
           <div
             data-testid="demo-big-card"
             style={{
