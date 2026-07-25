@@ -1,6 +1,6 @@
 {
   "name": "@hamster-note/virtual-paper",
-  "version": "0.1.0-beta.1",
+  "version": "0.2.0",
   "private": false,
   "publishConfig": {
     "access": "public",
@@ -28,6 +28,8 @@
     "build:lib": "vite build --config vite.lib.config.ts",
     "build:demo": "yarn build",
     "build:all": "yarn build:lib && yarn build:demo",
+    "prepublishOnly": "yarn build:lib",
+    "pack:check": "node scripts/check-pack.mjs",
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",

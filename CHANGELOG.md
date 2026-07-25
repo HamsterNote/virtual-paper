@@ -5,15 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-07-11
+
+### 新增
+- 新增 reader mode（阅读器模式）替代 scroll mode，支持原生滚动与弹性边缘
+- 新增 contain mode（约束模式），支持 `containMarginX`/`containMarginY` 配置
+- 新增 `lazyWillChange` 属性，优化触摸手势性能
+- 新增演示面板中的 containMarginX/containMarginY 控制项
+- 新增演示面板中的 lazyWillChange 控制项
+
+### 变更
+- 用 reader mode 替代 scroll mode
+- 多拖拽惯性模式现在始终处于禁用状态
+- `edgeElasticScroll` 与 `readerMode` 继续保持支持
 
 ### 移除
 - 移除 `inertialScroll` 属性及相关支持
 - 移除演示中惯性滚动的开关
 
-### 变更
-- 多拖拽惯性模式现在始终处于禁用状态
-- `edgeElasticScroll` 与 `readerMode` 继续保持支持
+### 修复
+- 修复 PR #2 代码审查发现的多个问题
+- 修复边缘弹性回弹竞态问题并允许文字选择
+- 修复 reader mode 原生滚动泄漏 transform mode will-change 的问题
+- 修复无效的 contain margins 并取消边距变化时的待处理 settle
 
 ## [0.1.0-beta.1] - 2026-06-18
 

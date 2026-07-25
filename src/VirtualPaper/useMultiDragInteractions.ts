@@ -10,20 +10,18 @@ import {
 } from '@system-ui-js/multi-drag'
 import {
   applyElasticContainResistance,
-  clampReaderTransform,
-  clampScale,
-  validateReaderModeZoomDebounceMs
+  clampScale
 } from './transform'
 import {
   measureContainBox,
   projectContainTransformForElements
 } from './containMode'
 import { createElasticSettleController } from './elasticSettle'
+import { useReaderTouchZoom } from './useReaderTouchZoom'
 import {
   type UseVirtualPaperInteractionArgs,
   type VirtualPaperInteractionMode as VirtualPaperInteractionModeType,
   type VirtualPaperTransform,
-  READER_MODE_NATIVE_TOUCH_ACTION,
   VirtualPaperInteractionMode
 } from './types'
 
@@ -41,13 +39,6 @@ type ActivePointerGesture = {
 }
 
 const SCALE_EPSILON = 0.000001
-
-const READER_MODE_PAN_SOURCES = [
-  VirtualPaperInteractionMode.MouseDragPan,
-  VirtualPaperInteractionMode.TouchSingleFingerPan,
-  VirtualPaperInteractionMode.TouchTwoFingerPan,
-  VirtualPaperInteractionMode.PenPan
-]
 
 const getPointerModeFlags = (
   enabledInteractions: VirtualPaperInteractionModeType[]
@@ -221,31 +212,27 @@ export function useMultiDragInteractions(
     beginTransform,
     updateTransform,
     endTransform,
+    previewReaderZoom,
     isReaderMode,
     containMode,
     containMarginX = 0,
     containMarginY = 0,
     edgeElasticScroll = false,
     incrementElasticActive,
-    decrementElasticActive,
-    readerModeZoomDebounceMs
+    decrementElasticActive
   } = args
 
   const transformRef = useRef(transform)
   const minScaleRef = useRef(minScale)
   const maxScaleRef = useRef(maxScale)
-  const contentSizeRef = useRef(contentSize)
   const beginTransformRef = useRef(beginTransform)
   const updateTransformRef = useRef(updateTransform)
   const endTransformRef = useRef(endTransform)
-  const isReaderModeRef = useRef(isReaderMode)
   const containModeRef = useRef(containMode)
   const containMarginRef = useRef({ x: containMarginX, y: containMarginY })
   const edgeElasticScrollRef = useRef(edgeElasticScroll)
   const incrementElasticActiveRef = useRef(incrementElasticActive)
   const decrementElasticActiveRef = useRef(decrementElasticActive)
-  const readerModeZoomDebounceMsRef = useRef(readerModeZoomDebounceMs)
-  const readerZoomEndTimerRef = useRef<number | null>(null)
   const settleCancelRef = useRef<(() => void) | null>(null)
   const activeGestureRef = useRef<ActivePointerGesture | null>(null)
   // 保留最后一次非 null 的手势描述。
@@ -273,19 +260,26 @@ export function useMultiDragInteractions(
   transformRef.current = transform
   minScaleRef.current = minScale
   maxScaleRef.current = maxScale
-  contentSizeRef.current = contentSize
   beginTransformRef.current = beginTransform
   updateTransformRef.current = updateTransform
   endTransformRef.current = endTransform
-  isReaderModeRef.current = isReaderMode
   containModeRef.current = containMode
   containMarginRef.current = { x: containMarginX, y: containMarginY }
   edgeElasticScrollRef.current = edgeElasticScroll
   incrementElasticActiveRef.current = incrementElasticActive
   decrementElasticActiveRef.current = decrementElasticActive
-  readerModeZoomDebounceMsRef.current = readerModeZoomDebounceMs
 
   const flags = getPointerModeFlags(enabledInteractions)
+  useReaderTouchZoom({
+    wrapperRef,
+    enabled: isReaderMode === true && flags.touchTwoFingerZoom,
+    transform,
+    minScale,
+    maxScale,
+    contentSize,
+    previewReaderZoom,
+    endTransform
+  })
   const {
     setElasticActive,
     cancelSettleAnimation,
@@ -323,41 +317,12 @@ export function useMultiDragInteractions(
 
   useEffect(() => {
     const element = wrapperRef.current
-    if (!element || !hasPointerModes(flags)) return
+    // readerMode 的第一根手指必须从按下开始完全归浏览器所有。
+    // 原生滚动接管后 Pointer Events 会收到 pointercancel，因此 reader 缩放由
+    // useReaderTouchZoom 的 Touch Events 路径处理，不能再实例化 Mixin。
+    if (!element || isReaderMode || !hasPointerModes(flags)) return
 
     let mixin: Mixin | null = null
-    const touchActionBeforeMixin = element.style.touchAction
-
-    const cancelReaderZoomEnd = () => {
-      if (readerZoomEndTimerRef.current !== null) {
-        window.clearTimeout(readerZoomEndTimerRef.current)
-        readerZoomEndTimerRef.current = null
-      }
-    }
-
-    const scheduleReaderZoomEnd = (
-      transform: VirtualPaperTransform,
-      meta: {
-        source: VirtualPaperInteractionModeType
-        inputType: 'pointer'
-        phase: 'end'
-      }
-    ) => {
-      cancelReaderZoomEnd()
-
-      const debounceMs = validateReaderModeZoomDebounceMs(
-        readerModeZoomDebounceMsRef.current
-      )
-      if (debounceMs === 0) {
-        endTransformRef.current(transform, meta)
-        return
-      }
-
-      readerZoomEndTimerRef.current = window.setTimeout(() => {
-        endTransformRef.current(transform, meta)
-        readerZoomEndTimerRef.current = null
-      }, debounceMs)
-    }
 
     const getPose = (target: HTMLElement): Pose => {
       const rect = target.getBoundingClientRect()
@@ -405,10 +370,6 @@ export function useMultiDragInteractions(
       }
 
       if (!source) return
-
-      if (isReaderModeRef.current && READER_MODE_PAN_SOURCES.includes(source)) {
-        return
-      }
 
       const segment = zoomSegmentRef.current
       const currentMid = computeWrapperLocalMidpoint(
@@ -470,24 +431,10 @@ export function useMultiDragInteractions(
         }
       }
 
-      if (
-        isReaderModeRef.current &&
-        contentSizeRef.current &&
-        wrapperRef.current
-      ) {
-        nextTransform = clampReaderTransform(
-          nextTransform,
-          contentSizeRef.current,
-          wrapperRef.current.clientWidth,
-          wrapperRef.current.clientHeight
-        )
-      }
-
       // contain 约束：非阅读模式下，将变换投影到 wrapper 内不露空白的合法范围
       let elasticTargetTransform: VirtualPaperTransform | null = null
       if (
         containModeRef.current &&
-        !isReaderModeRef.current &&
         wrapperRef.current &&
         containerRef.current
       ) {
@@ -547,15 +494,6 @@ export function useMultiDragInteractions(
           inputType: 'pointer' as const,
           phase: 'end' as const
         }
-        if (
-          isReaderModeRef.current &&
-          source === VirtualPaperInteractionMode.TouchTwoFingerZoom
-        ) {
-          scheduleReaderZoomEnd(nextTransform, endMeta)
-          clearFinalEndFallback()
-          return
-        }
-
         if (
           elasticTargetTransform &&
           !transformsMatch(nextTransform, elasticTargetTransform)
@@ -646,7 +584,6 @@ export function useMultiDragInteractions(
     }
     const clearGesture = () => {
       clearGestureState(true)
-      cancelReaderZoomEnd()
     }
     const clearFinalEndFallback = () => {
       if ((mixin?.getFingers() ?? []).length > 0) return
@@ -676,13 +613,6 @@ export function useMultiDragInteractions(
       containerEl.addEventListener('pointerdown', blockMousePointerDown)
     }
 
-    if (isReaderMode) {
-      element.style.touchAction =
-        touchActionBeforeMixin && touchActionBeforeMixin !== 'none'
-          ? touchActionBeforeMixin
-          : READER_MODE_NATIVE_TOUCH_ACTION
-    }
-
     mixin.addEventListener(DragOperationType.Start, (fingers) => {
       cancelSettleAnimation()
       didScaleDuringGestureRef.current = false
@@ -691,9 +621,8 @@ export function useMultiDragInteractions(
       trackGesture(fingers)
       captureZoomSegment(fingers)
       if (
-        !isReaderModeRef.current &&
         activeGestureRef.current?.zoomSource ===
-          VirtualPaperInteractionMode.TouchTwoFingerZoom
+        VirtualPaperInteractionMode.TouchTwoFingerZoom
       ) {
         beginTransformRef.current()
       }
@@ -712,13 +641,9 @@ export function useMultiDragInteractions(
       didScaleDuringGestureRef.current = false
       singlePanBlockedAfterMultiRef.current = false
       cancelSettleAnimation()
-      cancelReaderZoomEnd()
       mixin?.destroy()
       if (containerEl && !flags.mouseDragPan) {
         containerEl.removeEventListener('pointerdown', blockMousePointerDown)
-      }
-      if (isReaderMode) {
-        element.style.touchAction = touchActionBeforeMixin
       }
     }
   }, [

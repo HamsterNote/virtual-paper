@@ -128,6 +128,16 @@ export type VirtualPaperTransformUpdater = (
 
 export type VirtualPaperTransformBegin = () => void
 
+export type VirtualPaperReaderZoomPreview = {
+  readonly transform: VirtualPaperTransform
+  readonly origin: { readonly x: number; readonly y: number }
+}
+
+export type VirtualPaperReaderZoomPreviewUpdater = (
+  preview: VirtualPaperReaderZoomPreview,
+  meta: VirtualPaperTransformMeta
+) => void
+
 export type UseVirtualPaperInteractionArgs = {
   wrapperRef: React.RefObject<HTMLDivElement | null>
   containerRef: React.RefObject<HTMLDivElement | null>
@@ -139,6 +149,7 @@ export type UseVirtualPaperInteractionArgs = {
   beginTransform: VirtualPaperTransformBegin
   updateTransform: VirtualPaperTransformUpdater
   endTransform: VirtualPaperTransformUpdater
+  previewReaderZoom?: VirtualPaperReaderZoomPreviewUpdater
   /**
    * 阅读模式下为 true。
    */

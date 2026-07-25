@@ -10,6 +10,7 @@ import {
 import type { CSSProperties } from 'react'
 import type {
   VirtualPaperProps,
+  VirtualPaperReaderZoomPreview,
   VirtualPaperTransform,
   VirtualPaperTransformMeta
 } from './types'
@@ -41,6 +42,7 @@ import './VirtualPaper.css'
  * 跳过 transform 更新，防止无限更新循环。
  */
 const READER_PROGRAMMATIC_SCROLL_TOLERANCE_PX = 1
+const READER_SCROLL_END_FALLBACK_MS = 120
 
 /**
  * 校验 lazyWillChange 是否为可用正值。
@@ -82,6 +84,10 @@ export const VirtualPaper = ({
     left: number
     top: number
   } | null>(null)
+  const pendingReaderScrollTransformRef =
+    useRef<VirtualPaperTransform | null>(null)
+  const readerScrollEndTimerRef =
+    useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const isControlled = controlledTransform !== undefined
   // 兼容已废弃的 renderMode：显式 readerMode 优先。
   const isReaderMode =
@@ -103,11 +109,16 @@ export const VirtualPaper = ({
     width: number
     height: number
   } | null>(null)
+  const [readerZoomPreview, setReaderZoomPreview] =
+    useState<VirtualPaperReaderZoomPreview | null>(null)
+  const readerZoomBaseTransformRef = useRef<VirtualPaperTransform | null>(null)
   const [elasticActiveCount, setElasticActiveCount] = useState(0)
   const elasticActive = elasticActiveCount > 0
 
   const [isWillChangeActive, setIsWillChangeActive] = useState(false)
   const isReaderModeRef = useRef(isReaderMode)
+  const previousReaderModeRef = useRef(isReaderMode)
+  const previousControlledTransformRef = useRef(controlledTransform)
   const lazyWillChangeRef = useRef(lazyWillChange)
   const willChangeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
     null
@@ -190,7 +201,20 @@ export const VirtualPaper = ({
     }
   }, [])
 
-  const transform = isControlled ? controlledTransform : uncontrolledTransform
+  const pendingTransformOnReaderExit =
+    !isControlled &&
+    previousReaderModeRef.current &&
+    !isReaderMode &&
+    pendingReaderScrollTransformRef.current !== null
+      ? pendingReaderScrollTransformRef.current
+      : null
+  const transform =
+    pendingTransformOnReaderExit ??
+    (isControlled ? controlledTransform : uncontrolledTransform)
+  const transformRef = useRef(transform)
+  if (pendingReaderScrollTransformRef.current === null) {
+    transformRef.current = transform
+  }
   const displayTransform = useMemo(() => {
     void containRevision
     const renderElasticTransform =
@@ -256,6 +280,62 @@ export const VirtualPaper = ({
     },
     [isControlled, onTransformChange, clearWillChangeTimer]
   )
+  const updateTransformRef = useRef(updateTransform)
+  updateTransformRef.current = updateTransform
+
+  const cancelPendingReaderScroll = useCallback(() => {
+    if (readerScrollEndTimerRef.current !== null) {
+      window.clearTimeout(readerScrollEndTimerRef.current)
+      readerScrollEndTimerRef.current = null
+    }
+    pendingReaderScrollTransformRef.current = null
+  }, [])
+
+  useLayoutEffect(() => {
+    const previousTransform = previousControlledTransformRef.current
+    previousControlledTransformRef.current = controlledTransform
+    if (
+      controlledTransform === undefined ||
+      (previousTransform !== undefined &&
+        controlledTransform.x === previousTransform.x &&
+        controlledTransform.y === previousTransform.y &&
+        controlledTransform.scale === previousTransform.scale)
+    )
+      return
+
+    cancelPendingReaderScroll()
+    transformRef.current = controlledTransform
+  }, [cancelPendingReaderScroll, controlledTransform])
+
+  useLayoutEffect(() => {
+    const wasReaderMode = previousReaderModeRef.current
+    previousReaderModeRef.current = isReaderMode
+    if (!wasReaderMode || isReaderMode) return
+
+    const pendingTransform = pendingReaderScrollTransformRef.current
+    if (pendingTransform === null) return
+
+    cancelPendingReaderScroll()
+    transformRef.current = pendingTransform
+    updateTransformRef.current(pendingTransform, {
+      source: VirtualPaperInteractionMode.TrackpadScrollPan,
+      inputType: 'wheel',
+      phase: 'change'
+    })
+  }, [cancelPendingReaderScroll, isReaderMode])
+
+  const previewReaderZoom = useCallback(
+    (
+      preview: VirtualPaperReaderZoomPreview,
+      meta: VirtualPaperTransformMeta
+    ) => {
+      cancelPendingReaderScroll()
+      readerZoomBaseTransformRef.current ??= transformRef.current
+      setReaderZoomPreview(preview)
+      onTransformChange?.(preview.transform, meta)
+    },
+    [cancelPendingReaderScroll, onTransformChange]
+  )
 
   const beginTransform = useCallback(() => {
     if (
@@ -269,8 +349,13 @@ export const VirtualPaper = ({
 
   const endTransform = useCallback(
     (next: VirtualPaperTransform, meta: VirtualPaperTransformMeta) => {
+      if (isReaderModeRef.current) cancelPendingReaderScroll()
       if (!isControlled) {
         setUncontrolledTransform(next)
+      }
+      if (isReaderModeRef.current) {
+        readerZoomBaseTransformRef.current = null
+        setReaderZoomPreview(null)
       }
       if (onTransformChangeEnd) {
         onTransformChangeEnd(next, meta)
@@ -284,7 +369,12 @@ export const VirtualPaper = ({
         }, ms)
       }
     },
-    [isControlled, onTransformChangeEnd, clearWillChangeTimer]
+    [
+      cancelPendingReaderScroll,
+      isControlled,
+      onTransformChangeEnd,
+      clearWillChangeTimer
+    ]
   )
 
   const transformStyle = useMemo(
@@ -312,9 +402,12 @@ export const VirtualPaper = ({
       height: wrapper?.clientHeight ?? 0
     }
   }, [contentHeight, contentWidth, isReaderMode])
+  const getReaderContentSizeRef = useRef(getReaderContentSize)
+  getReaderContentSizeRef.current = getReaderContentSize
 
   useLayoutEffect(() => {
     if (!isReaderMode) return
+    if (readerZoomPreview) return
     const wrapper = wrapperRef.current
     if (!wrapper) return
     const nextWidth = wrapper.clientWidth
@@ -339,8 +432,8 @@ export const VirtualPaper = ({
       wrapperWidth,
       wrapperHeight
     )
-    const targetLeft = Math.max(0, Math.round(readerLayout.scrollLeft))
-    const targetTop = Math.max(0, Math.round(readerLayout.scrollTop))
+    const targetLeft = Math.max(0, readerLayout.scrollLeft)
+    const targetTop = Math.max(0, readerLayout.scrollTop)
     const shouldUpdateScroll =
       wrapper.scrollLeft !== targetLeft || wrapper.scrollTop !== targetTop
 
@@ -354,20 +447,31 @@ export const VirtualPaper = ({
     if (wrapper.scrollTop !== targetTop) {
       wrapper.scrollTop = targetTop
     }
-  }, [getReaderContentSize, isReaderMode, transform])
+  }, [getReaderContentSize, isReaderMode, readerZoomPreview, transform])
 
   // 用 ref 持有最新 transform，避免 scroll handler 闭包过期。
   // 场景：滚动期间触发 ctrl+wheel 缩放时，闭包里的 transform.scale 会过期，
   // 后续 scroll 事件会用 stale scale 覆盖最新值，导致缩放被回退。
-  const transformRef = useRef(transform)
-  useLayoutEffect(() => {
-    transformRef.current = transform
-  }, [transform])
-
   useEffect(() => {
     if (!isReaderMode) return
     const wrapper = wrapperRef.current
     if (!wrapper) return
+
+    const commitNativeScroll = () => {
+      if (readerScrollEndTimerRef.current !== null) {
+        window.clearTimeout(readerScrollEndTimerRef.current)
+        readerScrollEndTimerRef.current = null
+      }
+      const nextTransform = pendingReaderScrollTransformRef.current
+      if (nextTransform === null) return
+
+      pendingReaderScrollTransformRef.current = null
+      updateTransformRef.current(nextTransform, {
+        source: VirtualPaperInteractionMode.TrackpadScrollPan,
+        inputType: 'wheel',
+        phase: 'change'
+      })
+    }
 
     const handleScroll = () => {
       const programmaticScroll = programmaticReaderScrollRef.current
@@ -383,7 +487,7 @@ export const VirtualPaper = ({
       }
 
       const currentTransform = transformRef.current
-      const readerContentSize = getReaderContentSize()
+      const readerContentSize = getReaderContentSizeRef.current()
       const layoutTransform = convertLayoutToTransform(
         readerContentSize.width * currentTransform.scale,
         readerContentSize.height * currentTransform.scale,
@@ -403,16 +507,28 @@ export const VirtualPaper = ({
         currentTransform.scale === nextTransform.scale
       )
         return
-      updateTransform(nextTransform, {
-        source: VirtualPaperInteractionMode.TrackpadScrollPan,
-        inputType: 'wheel',
-        phase: 'change'
-      })
+
+      // 原生滚动期间只更新命令式姿态，避免 React commit 中断浏览器的惯性动画。
+      transformRef.current = nextTransform
+      pendingReaderScrollTransformRef.current = nextTransform
+
+      if (readerScrollEndTimerRef.current !== null) {
+        window.clearTimeout(readerScrollEndTimerRef.current)
+      }
+      readerScrollEndTimerRef.current = window.setTimeout(
+        commitNativeScroll,
+        READER_SCROLL_END_FALLBACK_MS
+      )
     }
 
     wrapper.addEventListener('scroll', handleScroll, { passive: true })
-    return () => wrapper.removeEventListener('scroll', handleScroll)
-  }, [getReaderContentSize, isReaderMode, updateTransform])
+    wrapper.addEventListener('scrollend', commitNativeScroll, { passive: true })
+    return () => {
+      wrapper.removeEventListener('scroll', handleScroll)
+      wrapper.removeEventListener('scrollend', commitNativeScroll)
+      cancelPendingReaderScroll()
+    }
+  }, [cancelPendingReaderScroll, isReaderMode])
 
   useEffect(() => {
     return () => clearWillChangeTimer()
@@ -506,6 +622,7 @@ export const VirtualPaper = ({
     beginTransform,
     updateTransform,
     endTransform,
+    previewReaderZoom,
     isReaderMode,
     containMode: isContainMode,
     containMarginX,
@@ -527,6 +644,7 @@ export const VirtualPaper = ({
     beginTransform,
     updateTransform,
     endTransform,
+    previewReaderZoom,
     isReaderMode,
     containMode: isContainMode,
     containMarginX,
@@ -543,30 +661,66 @@ export const VirtualPaper = ({
     const measuredHeight =
       readerWrapperSize?.height ?? wrapper?.clientHeight ?? 0
     const readerContentSize = getReaderContentSize()
+    const readerLayoutTransform =
+      readerZoomBaseTransformRef.current ?? transform
     const readerMetrics = computeReaderLayoutMetrics(
       readerContentSize,
-      transform.scale,
+      readerLayoutTransform.scale,
       measuredWidth,
       measuredHeight,
-      transform
+      readerLayoutTransform
     )
+
+    const previewStyles: CSSProperties = {}
+    if (readerZoomPreview) {
+      const targetMetrics = computeReaderLayoutMetrics(
+        readerContentSize,
+        readerZoomPreview.transform.scale,
+        measuredWidth,
+        measuredHeight,
+        readerZoomPreview.transform
+      )
+      const scaleRatio =
+        readerZoomPreview.transform.scale / readerLayoutTransform.scale
+      const originX =
+        readerZoomPreview.origin.x +
+        readerMetrics.scrollLeft -
+        readerMetrics.offsetX
+      const originY =
+        readerZoomPreview.origin.y +
+        readerMetrics.scrollTop -
+        readerMetrics.offsetY
+      const targetLeft = targetMetrics.offsetX - targetMetrics.scrollLeft
+      const targetTop = targetMetrics.offsetY - targetMetrics.scrollTop
+      const baseLeft = readerMetrics.offsetX - readerMetrics.scrollLeft
+      const baseTop = readerMetrics.offsetY - readerMetrics.scrollTop
+      const translateX =
+        targetLeft - baseLeft - (1 - scaleRatio) * originX
+      const translateY =
+        targetTop - baseTop - (1 - scaleRatio) * originY
+      previewStyles.transformOrigin = `${originX}px ${originY}px`
+      previewStyles.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${scaleRatio})`
+      previewStyles.willChange = 'transform'
+    }
 
     const readerWrapperStyles: CSSProperties = {
       ...baseWrapperStyle,
       overflow: 'auto',
       ...style,
-      ...wrapperPropsStyle
+      ...wrapperPropsStyle,
+      touchAction: READER_MODE_NATIVE_TOUCH_ACTION
     }
     const readerContainerStyles: CSSProperties = {
       position: 'relative',
-      touchAction: READER_MODE_NATIVE_TOUCH_ACTION,
       userSelect: 'none',
       ...containerStyle,
       ...containerPropsStyle,
+      touchAction: READER_MODE_NATIVE_TOUCH_ACTION,
       width: readerMetrics.width,
       height: readerMetrics.height,
       marginLeft: readerMetrics.offsetX,
-      marginTop: readerMetrics.offsetY
+      marginTop: readerMetrics.offsetY,
+      ...previewStyles
     }
     return (
       <div

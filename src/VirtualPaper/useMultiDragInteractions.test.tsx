@@ -7,6 +7,7 @@ import {
   type UseVirtualPaperInteractionArgs,
   VirtualPaperInteractionMode,
   type VirtualPaperTransform,
+  type VirtualPaperReaderZoomPreviewUpdater,
   type VirtualPaperTransformUpdater
 } from './types'
 
@@ -126,6 +127,7 @@ type HarnessProps = Partial<UseVirtualPaperInteractionArgs> & {
   beginTransform?: () => void
   updateTransform?: VirtualPaperTransformUpdater
   endTransform?: VirtualPaperTransformUpdater
+  previewReaderZoom?: VirtualPaperReaderZoomPreviewUpdater
   containMode?: boolean
   /** @deprecated 测试 harness 兼容旧 API，内部已映射为 increment/decrement。 */
   elasticActiveRef?: MutableRefObject<boolean>
@@ -141,6 +143,7 @@ function TestHarness({
   beginTransform = vi.fn(),
   updateTransform = vi.fn(),
   endTransform = vi.fn(),
+  previewReaderZoom,
   containMode = false,
   containMarginX = 0,
   containMarginY = 0,
@@ -166,6 +169,7 @@ function TestHarness({
     beginTransform,
     updateTransform,
     endTransform,
+    previewReaderZoom,
     containMode,
     containMarginX,
     containMarginY,
@@ -502,17 +506,21 @@ describe('useMultiDragInteractions', () => {
     expect(getLastInstance().singleFingerMixinTypes).toEqual([])
   })
 
-  it('restores wrapper native touch pan after multi-drag mutates touch-action in readerMode', () => {
+  it('does not instantiate multi-drag in readerMode', () => {
     render(
       <TestHarness
-        enabledInteractions={[VirtualPaperInteractionMode.TouchSingleFingerPan]}
+        enabledInteractions={[
+          VirtualPaperInteractionMode.TouchSingleFingerPan,
+          VirtualPaperInteractionMode.TouchTwoFingerPan,
+          VirtualPaperInteractionMode.TouchTwoFingerZoom
+        ]}
         isReaderMode
       />
     )
 
     const wrapper = screen.getByTestId('wrapper')
-    expect(getLastInstance().element).toBe(wrapper)
-    expect(wrapper.style.touchAction).toBe('pan-x pan-y')
+    expect(wrapper.style.touchAction).not.toBe('none')
+    expect(multiDragMock.Mixin).not.toHaveBeenCalled()
   })
 
   it('anchors two-finger pinch at the finger midpoint so content follows the fingers', () => {
@@ -898,45 +906,6 @@ describe('useMultiDragInteractions', () => {
     const panTransform = updateTransform.mock
       .calls[0][0] as VirtualPaperTransform
     expect(panTransform).toEqual({ x: 70, y: 60, scale: 1 })
-  })
-
-  it('cancels pending reader-mode zoom end when AllEnd clears the gesture', () => {
-    vi.useFakeTimers()
-    const endTransform = vi.fn()
-    render(
-      <TestHarness
-        transform={{ x: 0, y: 0, scale: 1 }}
-        enabledInteractions={[VirtualPaperInteractionMode.TouchTwoFingerZoom]}
-        contentSize={{ width: 1000, height: 1000 }}
-        endTransform={endTransform}
-        isReaderMode
-        readerModeZoomDebounceMs={500}
-      />
-    )
-
-    const wrapper = screen.getByTestId('wrapper')
-    const container = screen.getByTestId('container')
-    Object.defineProperty(wrapper, 'clientWidth', {
-      value: 500,
-      configurable: true
-    })
-    Object.defineProperty(wrapper, 'clientHeight', {
-      value: 500,
-      configurable: true
-    })
-
-    const instance = getLastInstance()
-    const fingerA = makeFingerWithPoint('touch', true, { x: 100, y: 100 })
-    const fingerB = makeFingerWithPoint('touch', false, { x: 300, y: 100 })
-
-    instance.trigger('start', [fingerA, fingerB])
-    instance.options.setPoseOnEnd?.(container, { scale: 2 })
-    expect(endTransform).not.toHaveBeenCalled()
-
-    instance.trigger('allEnd', [])
-    vi.advanceTimersByTime(500)
-
-    expect(endTransform).not.toHaveBeenCalled()
   })
 
   // ─────────────────────────────────────────────────────────────────────

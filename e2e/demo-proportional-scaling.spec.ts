@@ -10,6 +10,14 @@ type TransformReadout = {
   scale: number
 }
 
+type DemoContentMetrics = {
+  padding: number
+  gap: number
+  headingFontSize: number
+  cardHeight: number
+  cardBorderRadius: number
+}
+
 async function readTransform(page: Page): Promise<TransformReadout> {
   const readout = page.locator('[data-testid="transform-readout"]')
   const text = await readout.innerText()
@@ -22,6 +30,28 @@ async function readTransform(page: Page): Promise<TransformReadout> {
     y: Number(match?.[2]),
     scale: Number(match?.[3])
   }
+}
+
+async function readDemoContentMetrics(page: Page): Promise<DemoContentMetrics> {
+  return page.locator('[data-testid="demo-big-card"]').evaluate((element) => {
+    const card = element.querySelector<HTMLElement>('[data-testid="demo-card-1"]')
+    const heading = element.querySelector<HTMLElement>('h2')
+
+    if (!card || !heading) {
+      throw new Error('Demo content is incomplete')
+    }
+
+    const rootStyle = getComputedStyle(element)
+    const cardStyle = getComputedStyle(card)
+
+    return {
+      padding: Number.parseFloat(rootStyle.paddingTop),
+      gap: Number.parseFloat(rootStyle.rowGap),
+      headingFontSize: Number.parseFloat(getComputedStyle(heading).fontSize),
+      cardHeight: Number.parseFloat(cardStyle.height),
+      cardBorderRadius: Number.parseFloat(cardStyle.borderTopLeftRadius)
+    }
+  })
 }
 
 /**
@@ -178,5 +208,144 @@ test.describe('Demo proportional scaling', () => {
     await page.screenshot({
       path: `${EVIDENCE_DIR}/proportional-scaling-disabled.png`
     })
+  })
+
+  test('reader mode scales internal dimensions only after zoom commits', async ({
+    page
+  }) => {
+    // Given：仅启用阅读模式，不依赖普通 transform 模式的“等比缩放”开关。
+    await page.click('[data-testid="reader-mode-toggle"]')
+    await expect(page.locator('[data-testid="reader-mode-toggle"]')).toBeChecked()
+    await expect(
+      page.locator('[data-testid="proportional-scaling-toggle"]')
+    ).not.toBeChecked()
+
+    const container = page.locator('.paper-stage .virtual-paper-container')
+    const initialMetrics = await readDemoContentMetrics(page)
+    const bigCard = page.locator('[data-testid="demo-big-card"]')
+    const initialOverflow = await bigCard.evaluate((element) => ({
+      horizontal: element.scrollWidth - element.clientWidth,
+      vertical: element.scrollHeight - element.clientHeight
+    }))
+
+    // When：触发一次阅读模式滚轮缩放，先进入 CSS transform 预览阶段。
+    const box = await container.boundingBox()
+    expect(box).not.toBeNull()
+    await container.dispatchEvent('wheel', {
+      deltaY: -300,
+      ctrlKey: true,
+      clientX: (box?.x ?? 0) + (box?.width ?? 0) / 2,
+      clientY: (box?.y ?? 0) + (box?.height ?? 0) / 2
+    })
+
+    await expect
+      .poll(async () => container.evaluate((element) => getComputedStyle(element).transform))
+      .not.toBe('none')
+
+    // Then：预览阶段只由外层 transform 缩放，内部尺寸仍保持基础值，避免双重缩放。
+    const previewMetrics = await readDemoContentMetrics(page)
+    expect(previewMetrics).toEqual(initialMetrics)
+
+    // Then：防抖提交后移除 transform，并让字体、padding、gap、圆角和卡片高度等比变化。
+    await expect
+      .poll(async () => container.evaluate((element) => getComputedStyle(element).transform))
+      .toBe('none')
+
+    const committedTransform = await readTransform(page)
+    const committedMetrics = await readDemoContentMetrics(page)
+    expect(committedTransform.scale).toBeGreaterThan(1)
+    expect(committedMetrics.padding).toBeCloseTo(
+      initialMetrics.padding * committedTransform.scale,
+      1
+    )
+    expect(committedMetrics.gap).toBeCloseTo(
+      initialMetrics.gap * committedTransform.scale,
+      1
+    )
+    expect(committedMetrics.headingFontSize).toBeCloseTo(
+      initialMetrics.headingFontSize * committedTransform.scale,
+      1
+    )
+    expect(committedMetrics.cardHeight).toBeCloseTo(
+      initialMetrics.cardHeight * committedTransform.scale,
+      1
+    )
+    expect(committedMetrics.cardBorderRadius).toBeCloseTo(
+      initialMetrics.cardBorderRadius * committedTransform.scale,
+      1
+    )
+
+    const committedOverflow = await bigCard.evaluate((element) => ({
+      horizontal: element.scrollWidth - element.clientWidth,
+      vertical: element.scrollHeight - element.clientHeight
+    }))
+    // scrollWidth/scrollHeight 会取整，因此按比例后的裁切量允许 1px 舍入误差。
+    expect(
+      Math.abs(
+        committedOverflow.horizontal -
+          initialOverflow.horizontal * committedTransform.scale
+      )
+    ).toBeLessThanOrEqual(1)
+    expect(
+      Math.abs(
+        committedOverflow.vertical -
+          initialOverflow.vertical * committedTransform.scale
+      )
+    ).toBeLessThanOrEqual(1)
+
+    await page.screenshot({
+      path: `${EVIDENCE_DIR}/reader-mode-content-scaling-committed.png`,
+      fullPage: true
+    })
+
+    const wrapper = page.locator('[data-testid="virtual-paper-wrapper"]')
+    await wrapper.evaluate((element) => {
+      element.scrollTo({ left: element.scrollWidth, top: element.scrollHeight })
+    })
+    await page.screenshot({
+      path: `${EVIDENCE_DIR}/reader-mode-content-scaling-scroll-end.png`,
+      fullPage: true
+    })
+
+    // When：重置已提交的阅读模式缩放。
+    await page.click('[data-testid="reset-transform"]')
+
+    // Then：纸张与内部尺寸同时回到基础比例。
+    await expect.poll(async () => (await readTransform(page)).scale).toBe(1)
+    expect(await readDemoContentMetrics(page)).toEqual(initialMetrics)
+  })
+
+  test('controlled reader scale keeps paper and content coherent through reset', async ({
+    page
+  }) => {
+    // Given：启用阅读模式和受控模式，并应用 2 倍缩放。
+    await page.click('[data-testid="reader-mode-toggle"]')
+    await page.click('[data-testid="controlled-toggle"]')
+    await page.fill('[data-testid="controlled-scale-input"]', '2')
+    await page.click('[data-testid="apply-controlled-transform"]')
+
+    const container = page.locator('.paper-stage .virtual-paper-container')
+
+    // Then：纸张布局与内部尺寸使用同一个受控比例。
+    await expect(container).toHaveCSS('width', '1200px')
+    await expect(container).toHaveCSS('height', '800px')
+    const scaledMetrics = await readDemoContentMetrics(page)
+    expect(scaledMetrics.padding).toBeCloseTo(48, 1)
+    expect(scaledMetrics.headingFontSize).toBeCloseTo(44, 1)
+    expect(scaledMetrics.cardHeight).toBeCloseTo(160, 1)
+
+    // When：重置受控阅读模式。
+    await page.click('[data-testid="reset-transform"]')
+
+    // Then：受控值、纸张布局和内部尺寸全部恢复基础比例。
+    await expect(page.locator('[data-testid="controlled-scale-input"]')).toHaveValue(
+      '1'
+    )
+    await expect(container).toHaveCSS('width', '600px')
+    await expect(container).toHaveCSS('height', '400px')
+    const resetMetrics = await readDemoContentMetrics(page)
+    expect(resetMetrics.padding).toBeCloseTo(24, 1)
+    expect(resetMetrics.headingFontSize).toBeCloseTo(22, 1)
+    expect(resetMetrics.cardHeight).toBeCloseTo(80, 1)
   })
 })

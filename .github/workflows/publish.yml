@@ -1,74 +1,135 @@
-# Publish Workflow - Tag 发布到 NPM
-# 当推送 v*.*.* 格式的 tag 时触发
-# - v1.0.0 发布正式版
-# - v1.0.0-beta.1 发布 beta 版
-name: Publish to NPM
+name: Publish to npm (tags)
 
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: read
 
 jobs:
   publish:
-    name: Publish to NPM
+    name: Build and Publish
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify tag and prepare env
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "Detected tag: $TAG"
+
+          VERSION="${TAG#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+          PKG_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
+
+          if [[ "$PKG_VERSION" != "$VERSION" ]]; then
+            echo "::error::Tag version $VERSION does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+
+          if [[ "$PKG_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            PUBLISH_TAG=latest
+            echo "Version type: Release"
+          elif [[ "$PKG_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            PRERELEASE_TYPE="${BASH_REMATCH[1]}"
+
+            case "$PRERELEASE_TYPE" in
+              dev|beta|alpha|rc|next)
+                PUBLISH_TAG="$PRERELEASE_TYPE"
+                echo "Version type: $PRERELEASE_TYPE pre-release"
+                ;;
+              *)
+                echo "::error::Unsupported pre-release type: $PRERELEASE_TYPE"
+                exit 1
+                ;;
+            esac
+          else
+            echo "::error::Version $PKG_VERSION is not a supported SemVer release"
+            exit 1
+          fi
+
+          echo "PUBLISH_TAG=$PUBLISH_TAG" >> "$GITHUB_ENV"
+          echo "Tag version: $VERSION"
+          echo "Package version: $PKG_VERSION"
+          echo "Publish tag: $PUBLISH_TAG"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'yarn'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: yarn
 
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
-
-      - name: Build library
-        run: yarn build:lib
-
-      - name: Extract version info from tag
-        id: version
         run: |
-          # 去掉 v 前缀
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          corepack enable
+          yarn --version
+          yarn install --frozen-lockfile
 
-          # 判断是否为 beta 版本
-          if [[ "$VERSION" == *"-beta"* ]]; then
-            echo "tag=beta" >> $GITHUB_OUTPUT
-            echo "publish_tag=--tag beta" >> $GITHUB_OUTPUT
+      - name: Check if version already published
+        id: version
+        shell: bash
+        run: |
+          PKG_NAME=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).name)")
+          VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
+          echo "Package: $PKG_NAME"
+          echo "Version: $VERSION"
+          if npm view "$PKG_NAME@$VERSION" version > /dev/null 2>&1; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "Version $VERSION already exists on npm, skip publishing."
           else
-            echo "tag=latest" >> $GITHUB_OUTPUT
-            echo "publish_tag=" >> $GITHUB_OUTPUT
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "Version $VERSION not found on npm, will publish."
           fi
 
-      - name: Verify package version matches tag
+      - name: Verify npm authentication
+        if: steps.version.outputs.should_publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+        shell: bash
         run: |
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          TAG_VERSION="${{ steps.version.outputs.version }}"
-          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "❌ package.json version ($PKG_VERSION) does not match tag version ($TAG_VERSION)"
+          if [[ -z "$NODE_AUTH_TOKEN" ]]; then
+            echo "NPM_TOKEN is empty or unavailable in this workflow."
             exit 1
           fi
-          echo "✅ Version verified: $PKG_VERSION"
 
-      - name: Publish to NPM
-        run: npm publish --access public ${{ steps.version.outputs.publish_tag }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          echo "Registry: $(npm config get registry)"
+          npm whoami
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          generate_release_notes: true
+      - name: Build project
+        if: steps.version.outputs.should_publish == 'true'
+        run: |
+          yarn build:lib
+
+      - name: Check publish package boundary
+        if: steps.version.outputs.should_publish == 'true'
+        run: |
+          yarn pack:check
+
+      - name: Publish to npm
+        if: steps.version.outputs.should_publish == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+        run: |
+          npm publish --tag "$PUBLISH_TAG" --access public
+
+      - name: Ensure pre-release dist-tag
+        if: env.PUBLISH_TAG != 'latest' && steps.version.outputs.should_publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+        run: |
+          PKG_NAME=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).name)")
+          VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
+          echo "Ensure dist-tag: ${PUBLISH_TAG} -> $VERSION"
+          npm dist-tag add "$PKG_NAME@$VERSION" "$PUBLISH_TAG" || true
+          npm dist-tag ls "$PKG_NAME"
