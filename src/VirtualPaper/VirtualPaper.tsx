@@ -27,8 +27,10 @@ import {
   convertLayoutToTransform,
   convertTransformToLayout,
   getInitialTransform,
+  isTransformWithinEpsilon,
   serializeTransform,
-  mergeDefaultTransform
+  mergeDefaultTransform,
+  validateReaderModeZoomDebounceMs
 } from './transform'
 import { projectContainTransformForElements } from './containMode'
 import { useMultiDragInteractions } from './useMultiDragInteractions'
@@ -62,6 +64,7 @@ export const VirtualPaper = ({
   containMarginY = 0,
   edgeElasticScroll = false,
   readerModeZoomDebounceMs,
+  readerModeExternalZoomPreview = false,
   lazyWillChange = 0,
   contentSize,
   transform: controlledTransform,
@@ -112,6 +115,18 @@ export const VirtualPaper = ({
   const [readerZoomPreview, setReaderZoomPreview] =
     useState<VirtualPaperReaderZoomPreview | null>(null)
   const readerZoomBaseTransformRef = useRef<VirtualPaperTransform | null>(null)
+  const readerZoomPreviewMetaRef = useRef<VirtualPaperTransformMeta | null>(
+    null
+  )
+  const lastInternallyEmittedTransformRef =
+    useRef<VirtualPaperTransform | null>(null)
+  const readerExternalZoomTimerRef = useRef<ReturnType<
+    typeof window.setTimeout
+  > | null>(null)
+  const pendingExternalZoomTargetRef = useRef<VirtualPaperTransform | null>(
+    null
+  )
+  const isExternalZoomSessionRef = useRef(false)
   const [elasticActiveCount, setElasticActiveCount] = useState(0)
   const elasticActive = elasticActiveCount > 0
 
@@ -132,6 +147,15 @@ export const VirtualPaper = ({
       window.clearTimeout(willChangeTimerRef.current)
       willChangeTimerRef.current = null
     }
+  }, [])
+
+  const cancelExternalReaderZoomPreview = useCallback(() => {
+    if (readerExternalZoomTimerRef.current !== null) {
+      window.clearTimeout(readerExternalZoomTimerRef.current)
+      readerExternalZoomTimerRef.current = null
+    }
+    pendingExternalZoomTargetRef.current = null
+    isExternalZoomSessionRef.current = false
   }, [])
 
   const incrementElasticActive = useCallback(() => {
@@ -212,7 +236,7 @@ export const VirtualPaper = ({
     pendingTransformOnReaderExit ??
     (isControlled ? controlledTransform : uncontrolledTransform)
   const transformRef = useRef(transform)
-  if (pendingReaderScrollTransformRef.current === null) {
+  if (pendingReaderScrollTransformRef.current === null && !isControlled) {
     transformRef.current = transform
   }
   const displayTransform = useMemo(() => {
@@ -267,6 +291,7 @@ export const VirtualPaper = ({
       if (!isControlled) {
         setUncontrolledTransform(next)
       }
+      lastInternallyEmittedTransformRef.current = { ...next }
       if (onTransformChange) {
         onTransformChange(next, meta)
       }
@@ -292,25 +317,14 @@ export const VirtualPaper = ({
   }, [])
 
   useLayoutEffect(() => {
-    const previousTransform = previousControlledTransformRef.current
-    previousControlledTransformRef.current = controlledTransform
-    if (
-      controlledTransform === undefined ||
-      (previousTransform !== undefined &&
-        controlledTransform.x === previousTransform.x &&
-        controlledTransform.y === previousTransform.y &&
-        controlledTransform.scale === previousTransform.scale)
-    )
-      return
-
-    cancelPendingReaderScroll()
-    transformRef.current = controlledTransform
-  }, [cancelPendingReaderScroll, controlledTransform])
-
-  useLayoutEffect(() => {
     const wasReaderMode = previousReaderModeRef.current
     previousReaderModeRef.current = isReaderMode
     if (!wasReaderMode || isReaderMode) return
+
+    cancelExternalReaderZoomPreview()
+    readerZoomBaseTransformRef.current = null
+    readerZoomPreviewMetaRef.current = null
+    setReaderZoomPreview(null)
 
     const pendingTransform = pendingReaderScrollTransformRef.current
     if (pendingTransform === null) return
@@ -322,7 +336,7 @@ export const VirtualPaper = ({
       inputType: 'wheel',
       phase: 'change'
     })
-  }, [cancelPendingReaderScroll, isReaderMode])
+  }, [cancelExternalReaderZoomPreview, cancelPendingReaderScroll, isReaderMode])
 
   const previewReaderZoom = useCallback(
     (
@@ -331,7 +345,9 @@ export const VirtualPaper = ({
     ) => {
       cancelPendingReaderScroll()
       readerZoomBaseTransformRef.current ??= transformRef.current
+      readerZoomPreviewMetaRef.current = meta
       setReaderZoomPreview(preview)
+      lastInternallyEmittedTransformRef.current = { ...preview.transform }
       onTransformChange?.(preview.transform, meta)
     },
     [cancelPendingReaderScroll, onTransformChange]
@@ -350,11 +366,13 @@ export const VirtualPaper = ({
   const endTransform = useCallback(
     (next: VirtualPaperTransform, meta: VirtualPaperTransformMeta) => {
       if (isReaderModeRef.current) cancelPendingReaderScroll()
+      transformRef.current = next
       if (!isControlled) {
         setUncontrolledTransform(next)
       }
       if (isReaderModeRef.current) {
         readerZoomBaseTransformRef.current = null
+        readerZoomPreviewMetaRef.current = null
         setReaderZoomPreview(null)
       }
       if (onTransformChangeEnd) {
@@ -376,6 +394,148 @@ export const VirtualPaper = ({
       clearWillChangeTimer
     ]
   )
+  const endTransformRef = useRef(endTransform)
+  endTransformRef.current = endTransform
+
+  const startExternalReaderZoomPreview = useCallback(
+    (next: VirtualPaperTransform) => {
+      const debounceMs = validateReaderModeZoomDebounceMs(
+        readerModeZoomDebounceMs
+      )
+      const wasExternalZoomSession = isExternalZoomSessionRef.current
+
+      cancelExternalReaderZoomPreview()
+      cancelPendingReaderScroll()
+
+      if (readerZoomPreview && !wasExternalZoomSession) {
+        const previewMeta = readerZoomPreviewMetaRef.current
+        if (previewMeta) {
+          endTransform(readerZoomPreview.transform, {
+            ...previewMeta,
+            phase: 'end'
+          })
+        }
+      }
+
+      if (debounceMs === 0) {
+        transformRef.current = next
+        readerZoomBaseTransformRef.current = null
+        readerZoomPreviewMetaRef.current = null
+        setReaderZoomPreview(null)
+        return
+      }
+
+      readerZoomBaseTransformRef.current ??= transformRef.current
+      const wrapper = wrapperRef.current
+      const measuredWidth =
+        readerWrapperSize?.width ?? wrapper?.clientWidth ?? 0
+      const measuredHeight =
+        readerWrapperSize?.height ?? wrapper?.clientHeight ?? 0
+      const target = { ...next }
+      const meta: VirtualPaperTransformMeta = {
+        source: 'controlledProp',
+        inputType: 'programmatic',
+        phase: 'change'
+      }
+
+      pendingExternalZoomTargetRef.current = target
+      isExternalZoomSessionRef.current = true
+      transformRef.current = target
+      setReaderZoomPreview({
+        transform: target,
+        origin: { x: measuredWidth / 2, y: measuredHeight / 2 }
+      })
+      lastInternallyEmittedTransformRef.current = { ...target }
+      onTransformChange?.(target, meta)
+
+      readerExternalZoomTimerRef.current = window.setTimeout(() => {
+        readerExternalZoomTimerRef.current = null
+        const pendingTarget = pendingExternalZoomTargetRef.current
+        pendingExternalZoomTargetRef.current = null
+        isExternalZoomSessionRef.current = false
+        if (pendingTarget === null) return
+        endTransformRef.current(pendingTarget, {
+          source: 'controlledProp',
+          inputType: 'programmatic',
+          phase: 'end'
+        })
+      }, debounceMs)
+    },
+    [
+      cancelExternalReaderZoomPreview,
+      cancelPendingReaderScroll,
+      endTransform,
+      onTransformChange,
+      readerModeZoomDebounceMs,
+      readerWrapperSize,
+      readerZoomPreview
+    ]
+  )
+
+  useLayoutEffect(() => {
+    const previousTransform = previousControlledTransformRef.current
+    previousControlledTransformRef.current = controlledTransform
+    if (
+      controlledTransform === undefined ||
+      (previousTransform !== undefined &&
+        controlledTransform.x === previousTransform.x &&
+        controlledTransform.y === previousTransform.y &&
+        controlledTransform.scale === previousTransform.scale)
+    )
+      return
+
+    const lastInternallyEmitted = lastInternallyEmittedTransformRef.current
+    if (
+      lastInternallyEmitted !== null &&
+      isTransformWithinEpsilon(controlledTransform, lastInternallyEmitted, 1e-6)
+    ) {
+      lastInternallyEmittedTransformRef.current = null
+      transformRef.current = controlledTransform
+      return
+    }
+    lastInternallyEmittedTransformRef.current = null
+
+    if (
+      previousTransform === undefined ||
+      !isReaderMode ||
+      !readerModeExternalZoomPreview
+    ) {
+      cancelPendingReaderScroll()
+      transformRef.current = controlledTransform
+      return
+    }
+
+    if (controlledTransform.scale === previousTransform.scale) {
+      cancelPendingReaderScroll()
+      transformRef.current = controlledTransform
+      if (isExternalZoomSessionRef.current) {
+        const target = { ...controlledTransform }
+        pendingExternalZoomTargetRef.current = target
+        setReaderZoomPreview((preview) =>
+          preview === null ? null : { ...preview, transform: target }
+        )
+      }
+      return
+    }
+
+    startExternalReaderZoomPreview(controlledTransform)
+  }, [
+    cancelPendingReaderScroll,
+    controlledTransform,
+    isReaderMode,
+    readerModeExternalZoomPreview,
+    startExternalReaderZoomPreview
+  ])
+
+  useLayoutEffect(() => {
+    if (readerModeExternalZoomPreview || !isExternalZoomSessionRef.current)
+      return
+
+    cancelExternalReaderZoomPreview()
+    readerZoomBaseTransformRef.current = null
+    readerZoomPreviewMetaRef.current = null
+    setReaderZoomPreview(null)
+  }, [cancelExternalReaderZoomPreview, readerModeExternalZoomPreview])
 
   const transformStyle = useMemo(
     () => serializeTransform(displayTransform),
@@ -421,6 +581,7 @@ export const VirtualPaper = ({
 
   useLayoutEffect(() => {
     if (!isReaderMode) return
+    if (readerZoomPreview) return
     const wrapper = wrapperRef.current
     if (!wrapper) return
     const wrapperWidth = wrapper.clientWidth
@@ -531,8 +692,11 @@ export const VirtualPaper = ({
   }, [cancelPendingReaderScroll, isReaderMode])
 
   useEffect(() => {
-    return () => clearWillChangeTimer()
-  }, [clearWillChangeTimer])
+    return () => {
+      clearWillChangeTimer()
+      cancelExternalReaderZoomPreview()
+    }
+  }, [cancelExternalReaderZoomPreview, clearWillChangeTimer])
 
   useEffect(() => {
     if (!isReaderMode && isLazyWillChangeEnabled(lazyWillChange)) return

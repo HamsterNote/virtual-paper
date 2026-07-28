@@ -12,6 +12,7 @@ import {
   convertTransformToLayout,
   convertLayoutToTransform,
   getInitialTransform,
+  isTransformWithinEpsilon,
   mergeDefaultTransform,
   projectContainTransform,
   serializeTransform,
@@ -70,6 +71,35 @@ describe('serializeTransform', () => {
     expect(serializeTransform({ x: -12.5, y: -0.75, scale: 1.2345 })).toBe(
       'translate3d(-12.5px, -0.75px, 0) scale(1.2345)'
     )
+  })
+})
+
+describe('isTransformWithinEpsilon', () => {
+  it('matches exact coordinates when scale differs only within epsilon', () => {
+    // Given: consumer-side scale normalization introduces a sub-epsilon delta.
+    const emitted = { x: -120, y: -240, scale: 1.5 }
+    const echoed = { x: -120, y: -240, scale: 1.5000005 }
+
+    // When/Then: the value is recognized as the same emitted transform.
+    expect(isTransformWithinEpsilon(emitted, echoed, 1e-6)).toBe(true)
+  })
+
+  it('rejects a scale difference beyond epsilon', () => {
+    // Given: the incoming transform has a materially different scale.
+    const emitted = { x: -120, y: -240, scale: 1.5 }
+    const changed = { x: -120, y: -240, scale: 1.500002 }
+
+    // When/Then: it is classified as a new transform rather than an echo.
+    expect(isTransformWithinEpsilon(emitted, changed, 1e-6)).toBe(false)
+  })
+
+  it('requires coordinates to match exactly', () => {
+    // Given: x differs by less than the scale epsilon.
+    const emitted = { x: -120, y: -240, scale: 1.5 }
+    const changed = { x: -119.9999995, y: -240, scale: 1.5 }
+
+    // When/Then: coordinate changes are never suppressed as callback echoes.
+    expect(isTransformWithinEpsilon(emitted, changed, 1e-6)).toBe(false)
   })
 })
 
