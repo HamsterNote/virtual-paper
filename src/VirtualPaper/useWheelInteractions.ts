@@ -127,7 +127,8 @@ export function useWheelInteractions(
     containMarginX = 0,
     containMarginY = 0,
     edgeElasticScroll = false,
-    isReaderMode = false
+    isReaderMode = false,
+    registerReaderZoomSessionCancel
   } = args
   const latestArgsRef = useRef(args)
   const wheelEndTimerRef = useRef<number | null>(null)
@@ -199,22 +200,24 @@ export function useWheelInteractions(
       transform: VirtualPaperTransform,
       source: VirtualPaperInteractionMode,
       debounceMs: number
-    ) => {
-      wheelEndStateRef.current = { transform, source }
+    ): WheelEndState => {
+      const wheelEndState = { transform, source }
+      wheelEndStateRef.current = wheelEndState
 
       if (wheelEndTimerRef.current !== null) {
         window.clearTimeout(wheelEndTimerRef.current)
+        wheelEndTimerRef.current = null
       }
 
-      if (debounceMs === 0) {
-        finishWheelTransform()
-        return
+      if (debounceMs > 0) {
+        wheelEndTimerRef.current = window.setTimeout(() => {
+          if (wheelEndStateRef.current === wheelEndState) {
+            finishWheelTransform()
+          }
+        }, debounceMs)
       }
 
-      wheelEndTimerRef.current = window.setTimeout(
-        finishWheelTransform,
-        debounceMs
-      )
+      return wheelEndState
     },
     [finishWheelTransform]
   )
@@ -229,6 +232,10 @@ export function useWheelInteractions(
     elasticTargetTransformRef.current = null
     cancelSettleAnimation()
   }, [cancelSettleAnimation])
+
+  useEffect(() => {
+    return registerReaderZoomSessionCancel?.(cancelPendingWheelElasticState)
+  }, [cancelPendingWheelElasticState, registerReaderZoomSessionCancel])
 
   const handleWheel = useCallback(
     (event: WheelEvent) => {
@@ -377,6 +384,12 @@ export function useWheelInteractions(
 
       event.preventDefault()
       const changeMeta = createWheelMeta(source, 'change')
+      const debounceMs = isReaderMode
+        ? validateReaderModeZoomDebounceMs(readerModeZoomDebounceMs)
+        : WHEEL_END_DEBOUNCE_MS
+      // 用户 change 回调可能同步发布受控 transform；必须先登记会话，
+      // 这样外部接管才能在回调重入期间取消尚未收尾的滚轮缩放。
+      const wheelEndState = scheduleWheelEnd(nextTransform, source, debounceMs)
       if (isReaderMode && wrapper && previewReaderZoom) {
         const wrapperRect = wrapper.getBoundingClientRect()
         previewReaderZoom(
@@ -392,15 +405,16 @@ export function useWheelInteractions(
       } else {
         updateTransform(nextTransform, changeMeta)
       }
-      scheduleWheelEnd(
-        nextTransform,
-        source,
-        isReaderMode
-          ? validateReaderModeZoomDebounceMs(readerModeZoomDebounceMs)
-          : WHEEL_END_DEBOUNCE_MS
-      )
+      if (debounceMs === 0 && wheelEndStateRef.current === wheelEndState) {
+        finishWheelTransform()
+      }
     },
-    [cancelSettleAnimation, scheduleWheelEnd, setElasticActive]
+    [
+      cancelSettleAnimation,
+      finishWheelTransform,
+      scheduleWheelEnd,
+      setElasticActive
+    ]
   )
 
   useEffect(() => {

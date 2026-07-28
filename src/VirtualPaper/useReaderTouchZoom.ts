@@ -8,6 +8,7 @@ import {
   type VirtualPaperContentSize,
   VirtualPaperInteractionMode,
   type VirtualPaperReaderZoomPreviewUpdater,
+  type VirtualPaperReaderZoomSessionCancelRegistrar,
   type VirtualPaperTransform,
   type VirtualPaperTransformUpdater
 } from './types'
@@ -20,6 +21,7 @@ type ReaderTouchZoomOptions = {
   readonly maxScale: number
   readonly contentSize?: VirtualPaperContentSize
   readonly previewReaderZoom?: VirtualPaperReaderZoomPreviewUpdater
+  readonly registerReaderZoomSessionCancel?: VirtualPaperReaderZoomSessionCancelRegistrar
   readonly endTransform: VirtualPaperTransformUpdater
 }
 
@@ -100,8 +102,10 @@ export function useReaderTouchZoom({
   maxScale,
   contentSize,
   previewReaderZoom,
+  registerReaderZoomSessionCancel,
   endTransform
 }: ReaderTouchZoomOptions): void {
+  const latestTransformRef = useRef(transform)
   const transformRef = useRef(transform)
   const minScaleRef = useRef(minScale)
   const maxScaleRef = useRef(maxScale)
@@ -110,6 +114,7 @@ export function useReaderTouchZoom({
   const endTransformRef = useRef(endTransform)
   const segmentRef = useRef<ZoomSegment | null>(null)
 
+  latestTransformRef.current = transform
   // 缩放预览会触发 React 重渲染；手势期间不能用尚未提交的 prop 覆盖最新姿态。
   if (segmentRef.current === null) transformRef.current = transform
   minScaleRef.current = minScale
@@ -135,6 +140,14 @@ export function useReaderTouchZoom({
       }
       pendingPreview = null
     }
+
+    const cancelReaderTouchZoom = () => {
+      cancelPendingPreview()
+      segmentRef.current = null
+      transformRef.current = latestTransformRef.current
+    }
+    const unregisterReaderZoomSessionCancel =
+      registerReaderZoomSessionCancel?.(cancelReaderTouchZoom)
 
     const schedulePreview = (
       nextTransform: VirtualPaperTransform,
@@ -263,12 +276,12 @@ export function useReaderTouchZoom({
     })
 
     return () => {
-      cancelPendingPreview()
-      segmentRef.current = null
+      unregisterReaderZoomSessionCancel?.()
+      cancelReaderTouchZoom()
       wrapper.removeEventListener('touchstart', handleTouchStart)
       wrapper.removeEventListener('touchmove', handleTouchMove)
       wrapper.removeEventListener('touchend', finishOrRestartSegment)
       wrapper.removeEventListener('touchcancel', finishOrRestartSegment)
     }
-  }, [enabled, wrapperRef])
+  }, [enabled, registerReaderZoomSessionCancel, wrapperRef])
 }

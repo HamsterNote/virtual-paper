@@ -56,6 +56,13 @@ export const serializeTransform = ({
   return `translate3d(${x}px, ${y}px, 0) scale(${scale})`
 }
 
+export const isTransformWithinEpsilon = (
+  a: VirtualPaperTransform,
+  b: VirtualPaperTransform,
+  epsilon: number
+): boolean =>
+  a.x === b.x && a.y === b.y && Math.abs(a.scale - b.scale) <= epsilon
+
 export const applyZoomAnchor = (
   current: VirtualPaperTransform,
   nextScale: number,

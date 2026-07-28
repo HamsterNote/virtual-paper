@@ -213,6 +213,7 @@ export function useMultiDragInteractions(
     updateTransform,
     endTransform,
     previewReaderZoom,
+    registerReaderZoomSessionCancel,
     isReaderMode,
     containMode,
     containMarginX = 0,
@@ -278,6 +279,7 @@ export function useMultiDragInteractions(
     maxScale,
     contentSize,
     previewReaderZoom,
+    registerReaderZoomSessionCancel,
     endTransform
   })
   const {

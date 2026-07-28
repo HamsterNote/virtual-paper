@@ -95,6 +95,12 @@ export type VirtualPaperProps = {
    */
   readerModeZoomDebounceMs?: number
   /**
+   * 为受控 `transform` 的外部缩放启用阅读模式预览；默认 false。
+   * 仅在 readerMode 与受控 transform 同时启用时生效，提交延迟复用
+   * readerModeZoomDebounceMs。
+   */
+  readerModeExternalZoomPreview?: boolean
+  /**
    * transform 渲染模式下延迟移除 will-change: transform 的防抖时间（毫秒）。
    * 默认 0 表示不主动设置 will-change；正值表示交互期间动态应用
    * will-change: transform，并在交互结束后等待该毫秒数再移除。
@@ -138,6 +144,12 @@ export type VirtualPaperReaderZoomPreviewUpdater = (
   meta: VirtualPaperTransformMeta
 ) => void
 
+export type VirtualPaperReaderZoomSessionCancel = () => void
+
+export type VirtualPaperReaderZoomSessionCancelRegistrar = (
+  cancel: VirtualPaperReaderZoomSessionCancel
+) => () => void
+
 export type UseVirtualPaperInteractionArgs = {
   wrapperRef: React.RefObject<HTMLDivElement | null>
   containerRef: React.RefObject<HTMLDivElement | null>
@@ -150,6 +162,7 @@ export type UseVirtualPaperInteractionArgs = {
   updateTransform: VirtualPaperTransformUpdater
   endTransform: VirtualPaperTransformUpdater
   previewReaderZoom?: VirtualPaperReaderZoomPreviewUpdater
+  registerReaderZoomSessionCancel?: VirtualPaperReaderZoomSessionCancelRegistrar
   /**
    * 阅读模式下为 true。
    */
