@@ -127,6 +127,7 @@ export const VirtualPaper = ({
     null
   )
   const isExternalZoomSessionRef = useRef(false)
+  const readerZoomSessionCancelersRef = useRef(new Set<() => void>())
   const [elasticActiveCount, setElasticActiveCount] = useState(0)
   const elasticActive = elasticActiveCount > 0
 
@@ -156,6 +157,17 @@ export const VirtualPaper = ({
     }
     pendingExternalZoomTargetRef.current = null
     isExternalZoomSessionRef.current = false
+  }, [])
+
+  const registerReaderZoomSessionCancel = useCallback(
+    (cancel: () => void) => {
+      readerZoomSessionCancelersRef.current.add(cancel)
+      return () => readerZoomSessionCancelersRef.current.delete(cancel)
+    },
+    []
+  )
+  const cancelReaderZoomSessions = useCallback(() => {
+    for (const cancel of readerZoomSessionCancelersRef.current) cancel()
   }, [])
 
   const incrementElasticActive = useCallback(() => {
@@ -344,13 +356,18 @@ export const VirtualPaper = ({
       meta: VirtualPaperTransformMeta
     ) => {
       cancelPendingReaderScroll()
+      cancelExternalReaderZoomPreview()
       readerZoomBaseTransformRef.current ??= transformRef.current
       readerZoomPreviewMetaRef.current = meta
       setReaderZoomPreview(preview)
       lastInternallyEmittedTransformRef.current = { ...preview.transform }
       onTransformChange?.(preview.transform, meta)
     },
-    [cancelPendingReaderScroll, onTransformChange]
+    [
+      cancelExternalReaderZoomPreview,
+      cancelPendingReaderScroll,
+      onTransformChange
+    ]
   )
 
   const beginTransform = useCallback(() => {
@@ -406,6 +423,7 @@ export const VirtualPaper = ({
 
       cancelExternalReaderZoomPreview()
       cancelPendingReaderScroll()
+      cancelReaderZoomSessions()
 
       if (readerZoomPreview && !wasExternalZoomSession) {
         const previewMeta = readerZoomPreviewMetaRef.current
@@ -464,6 +482,7 @@ export const VirtualPaper = ({
     [
       cancelExternalReaderZoomPreview,
       cancelPendingReaderScroll,
+      cancelReaderZoomSessions,
       endTransform,
       onTransformChange,
       readerModeZoomDebounceMs,
@@ -787,6 +806,7 @@ export const VirtualPaper = ({
     updateTransform,
     endTransform,
     previewReaderZoom,
+    registerReaderZoomSessionCancel,
     isReaderMode,
     containMode: isContainMode,
     containMarginX,
@@ -809,6 +829,7 @@ export const VirtualPaper = ({
     updateTransform,
     endTransform,
     previewReaderZoom,
+    registerReaderZoomSessionCancel,
     isReaderMode,
     containMode: isContainMode,
     containMarginX,

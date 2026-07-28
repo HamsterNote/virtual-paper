@@ -144,6 +144,12 @@ export type VirtualPaperReaderZoomPreviewUpdater = (
   meta: VirtualPaperTransformMeta
 ) => void
 
+export type VirtualPaperReaderZoomSessionCancel = () => void
+
+export type VirtualPaperReaderZoomSessionCancelRegistrar = (
+  cancel: VirtualPaperReaderZoomSessionCancel
+) => () => void
+
 export type UseVirtualPaperInteractionArgs = {
   wrapperRef: React.RefObject<HTMLDivElement | null>
   containerRef: React.RefObject<HTMLDivElement | null>
@@ -156,6 +162,7 @@ export type UseVirtualPaperInteractionArgs = {
   updateTransform: VirtualPaperTransformUpdater
   endTransform: VirtualPaperTransformUpdater
   previewReaderZoom?: VirtualPaperReaderZoomPreviewUpdater
+  registerReaderZoomSessionCancel?: VirtualPaperReaderZoomSessionCancelRegistrar
   /**
    * 阅读模式下为 true。
    */

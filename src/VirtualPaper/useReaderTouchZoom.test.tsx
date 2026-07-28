@@ -5,6 +5,7 @@ import { useReaderTouchZoom } from './useReaderTouchZoom'
 import {
   VirtualPaperInteractionMode,
   type VirtualPaperReaderZoomPreviewUpdater,
+  type VirtualPaperReaderZoomSessionCancelRegistrar,
   type VirtualPaperTransformUpdater,
   type VirtualPaperTransform
 } from './types'
@@ -19,6 +20,7 @@ type HarnessProps = {
   readonly transform?: VirtualPaperTransform
   readonly enabled?: boolean
   readonly previewReaderZoom?: VirtualPaperReaderZoomPreviewUpdater
+  readonly registerReaderZoomSessionCancel?: VirtualPaperReaderZoomSessionCancelRegistrar
   readonly endTransform?: VirtualPaperTransformUpdater
 }
 
@@ -26,6 +28,7 @@ function TestHarness({
   transform = { x: 0, y: 0, scale: 1 },
   enabled = true,
   previewReaderZoom = vi.fn<VirtualPaperReaderZoomPreviewUpdater>(),
+  registerReaderZoomSessionCancel,
   endTransform = vi.fn<VirtualPaperTransformUpdater>()
 }: HarnessProps) {
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -38,6 +41,7 @@ function TestHarness({
     maxScale: 4,
     contentSize: { width: 1000, height: 1000 },
     previewReaderZoom,
+    registerReaderZoomSessionCancel,
     endTransform
   })
 
@@ -219,6 +223,86 @@ describe('useReaderTouchZoom', () => {
         phase: 'end',
         originalEventType: 'touchend'
       }
+    )
+  })
+
+  it('does not end an active touch segment after external cancellation', () => {
+    const endTransform = vi.fn()
+    let cancelActiveSession: (() => void) | undefined
+    const registerReaderZoomSessionCancel = vi.fn((cancel: () => void) => {
+      cancelActiveSession = cancel
+      return () => {
+        cancelActiveSession = undefined
+      }
+    })
+    render(
+      <TestHarness
+        registerReaderZoomSessionCancel={registerReaderZoomSessionCancel}
+        endTransform={endTransform}
+      />
+    )
+    const wrapper = screen.getByTestId('wrapper')
+
+    dispatchTouches(wrapper, 'touchstart', [
+      { identifier: 1, clientX: 100, clientY: 100 },
+      { identifier: 2, clientX: 200, clientY: 200 }
+    ])
+    act(() => cancelActiveSession?.())
+    dispatchTouches(wrapper, 'touchend', [])
+
+    expect(registerReaderZoomSessionCancel).toHaveBeenCalledTimes(1)
+    expect(endTransform).not.toHaveBeenCalled()
+  })
+
+  it('starts the next pinch from the latest transform after cancellation', () => {
+    const { callbacks } = installPausedAnimationFrame()
+    const previewReaderZoom = vi.fn()
+    let cancelActiveSession: (() => void) | undefined
+    const registerReaderZoomSessionCancel = (cancel: () => void) => {
+      cancelActiveSession = cancel
+      return () => {
+        cancelActiveSession = undefined
+      }
+    }
+    const { rerender } = render(
+      <TestHarness
+        previewReaderZoom={previewReaderZoom}
+        registerReaderZoomSessionCancel={registerReaderZoomSessionCancel}
+      />
+    )
+    const wrapper = screen.getByTestId('wrapper')
+    Object.defineProperty(wrapper, 'clientWidth', { value: 500 })
+    Object.defineProperty(wrapper, 'clientHeight', { value: 400 })
+
+    dispatchTouches(wrapper, 'touchstart', [
+      { identifier: 1, clientX: 100, clientY: 100 },
+      { identifier: 2, clientX: 300, clientY: 100 }
+    ])
+    rerender(
+      <TestHarness
+        transform={{ x: 0, y: 0, scale: 2 }}
+        previewReaderZoom={previewReaderZoom}
+        registerReaderZoomSessionCancel={registerReaderZoomSessionCancel}
+      />
+    )
+    act(() => cancelActiveSession?.())
+
+    dispatchTouches(wrapper, 'touchstart', [
+      { identifier: 1, clientX: 100, clientY: 100 },
+      { identifier: 2, clientX: 300, clientY: 100 }
+    ])
+    dispatchTouches(wrapper, 'touchmove', [
+      { identifier: 1, clientX: 0, clientY: 100 },
+      { identifier: 2, clientX: 400, clientY: 100 }
+    ])
+    const [[, flushFrame]] = [...callbacks]
+    act(() => flushFrame(16))
+
+    expect(previewReaderZoom).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        transform: expect.objectContaining({ scale: 4 })
+      }),
+      expect.objectContaining({ phase: 'change' })
     )
   })
 })
