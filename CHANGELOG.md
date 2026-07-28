@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-07-28
+
+### 新增
+- reader mode 外部缩放预览（`readerModeExternalZoomPreview`）：在 reader mode 中通过 CSS transform 预览受控的外部缩放，并配有防抖提交周期
+- 内部手势回显通过 `isTransformWithinEpsilon` 进行去重，避免与外部缩放产生冲突
+
+### 修复
+- 修复外部 reader 缩放提交时活跃缩放会话未正确取消导致的竞态问题
+- 在触摸缩放和滚轮缩放交互中注入 `registerReaderZoomSessionCancel` 回调机制
+
 ## [1.0.0] - 2026-07-25
 
 ### 新增
